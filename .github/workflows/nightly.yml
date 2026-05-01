@@ -14,7 +14,7 @@ jobs:
     runs-on: macos-14
     env:
       APP_NAME: mq-dir
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,4 +56,3 @@ jobs:
           name: mq-dir-nightly
           path: dist/*
           if-no-files-found: error
-

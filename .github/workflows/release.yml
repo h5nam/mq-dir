@@ -19,7 +19,7 @@ jobs:
     runs-on: macos-14
     env:
       APP_NAME: mq-dir
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
       DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
       APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
