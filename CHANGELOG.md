@@ -22,6 +22,8 @@ versioning once public releases begin.
 - Maintainer-tap Homebrew cask scaffold.
 - M1 single-pane folder picker, read-only file list, sorting, open selected,
   parent navigation, hidden-file toggle, and Reveal in Finder wiring.
+- M2-lite pane shell ahead of schedule: 1/2/4-pane layout switching, focused
+  pane routing, and independent folder state per pane.
 - Core file-entry model, directory enumeration service, and XCTest coverage for
   hidden-file filtering and sort behavior.
 
