@@ -2,7 +2,7 @@
 
 > Quad-pane macOS file manager. Q-Dir heritage, Finder-class polish, opinionated state persistence.
 
-![status: pre-alpha (M0)](https://img.shields.io/badge/status-pre--alpha%20M0-orange)
+![status: pre-alpha (M1 in progress)](https://img.shields.io/badge/status-pre--alpha%20M1-orange)
 
 > _Screenshots coming after M1 ships._
 
@@ -13,9 +13,9 @@
 - **Embedded media preview without Spotlight gymnastics.** Spacebar QuickLook in M1; inline image / video / audio / PDF preview in M3.
 - **Persistence that just works.** Sort, scroll, column widths, expanded sidebar nodes — all restored on relaunch. Survives `kill -9`.
 
-## Status: M0 (skeleton)
+## Status: M1 in progress
 
-This is **pre-alpha**. M0 is the empty app shell — it launches, shows a placeholder window, and serves as the scaffolding for the upcoming milestones. There is no real folder browsing yet.
+This is **pre-alpha**. M0 is complete. M1 has started with a single-pane folder picker and read-only file list. Persistence, QuickLook, NSTableView column autosave, and the full M1 acceptance criteria are still in progress.
 
 The full roadmap and architecture decisions live in [`/.omc/plans/ralplan-mq-dir-v1.md`](.omc/plans/ralplan-mq-dir-v1.md).
 
@@ -64,8 +64,8 @@ PRs welcome. Contributions are accepted via [DCO](https://developercertificate.o
 
 ## Roadmap
 
-- **M0 — Skeleton** ← _you are here_. App shell, OSS docs, CI, signing scaffold.
-- **M1 — Single-pane MVP.** Folder browsing, persistent per-folder state, spacebar QuickLook. The load-bearing milestone.
+- **M0 — Skeleton.** App shell, OSS docs, CI, signing scaffold.
+- **M1 — Single-pane MVP** ← _in progress_. Folder browsing, persistent per-folder state, spacebar QuickLook. The load-bearing milestone.
 - **M2 — Multi-pane.** 1/2/3/4-pane layouts, per-pane tabs, session restore.
 - **M3 — Embedded preview.** Inline image (NSImageView with pinch-zoom), video / audio / PDF / text via QLPreviewView.
 - **M4 — Sidebar tree.** VS Code-style folder tree, lazy-loaded, navigates the focused pane.

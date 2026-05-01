@@ -20,6 +20,10 @@ versioning once public releases begin.
 - Signed/notarized release workflow scaffold for Developer ID distribution.
 - Ad-hoc signed nightly workflow scaffold for contributor testing.
 - Maintainer-tap Homebrew cask scaffold.
+- M1 single-pane folder picker, read-only file list, sorting, open selected,
+  parent navigation, hidden-file toggle, and Reveal in Finder wiring.
+- Core file-entry model, directory enumeration service, and XCTest coverage for
+  hidden-file filtering and sort behavior.
 
 ### Changed
 
@@ -39,4 +43,3 @@ versioning once public releases begin.
 ### Added
 
 - Initial M0 skeleton.
-
