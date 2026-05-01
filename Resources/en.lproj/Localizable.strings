@@ -1,0 +1,9 @@
+/*
+ mq-dir Localizable.strings (en)
+
+ v1 ships English-only. Scaffolding lives here so future contributors can add
+ ko.lproj / ja.lproj / etc. without a refactor. Keys are dot-namespaced.
+*/
+
+"mqdir.app.title" = "mq-dir";
+"mqdir.menu.file.openFolder" = "Open Folder…";

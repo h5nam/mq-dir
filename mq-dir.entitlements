@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    v1 ships non-sandboxed under Developer ID. Sandbox-related keys live in
+    mq-dir-sandboxed.entitlements, gated by the MQDIR_SANDBOXED build flag.
+    Keeping this file empty is intentional — see plan §4 + §3.5.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

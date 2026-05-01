@@ -1,0 +1,59 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    name: Ad-hoc signed nightly
+    runs-on: macos-14
+    env:
+      APP_NAME: mq-dir
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build ad-hoc signed app
+        run: |
+          xcodebuild \
+            -project mq-dir.xcodeproj \
+            -scheme mq-dir \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=YES \
+            build
+
+      - name: Package nightly
+        run: |
+          mkdir -p dist
+          APP_PATH="$(find build/DerivedData/Build/Products/Release -maxdepth 1 -name "${APP_NAME}.app" -print -quit)"
+          test -n "$APP_PATH"
+          SHORT_SHA="$(printf "%s" "$GITHUB_SHA" | cut -c1-7)"
+          ditto -c -k --keepParent "$APP_PATH" "dist/${APP_NAME}-nightly-${SHORT_SHA}.zip"
+          shasum -a 256 dist/* > dist/SHA256SUMS
+
+      - name: Upload nightly artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mq-dir-nightly
+          path: dist/*
+          if-no-files-found: error
+

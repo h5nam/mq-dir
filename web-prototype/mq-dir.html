@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>mq-dir</title>
+<style>
+:root {
+  --desktop-bg: #0a0a0c;
+  --window-bg: #1d1d1f;
+  --toolbar-bg: rgba(40,40,42,0.92);
+  --sidebar-bg: rgba(30,30,32,0.92);
+  --pane-bg: #1d1d1f;
+  --pane-header-bg: rgba(255,255,255,0.015);
+  --tab-bar-bg: rgba(0,0,0,0.18);
+  --tab-active-bg: rgba(255,255,255,0.04);
+  --column-header-bg: rgba(0,0,0,0.12);
+  --statusbar-bg: rgba(28,28,30,0.95);
+  --preview-bg: #161618;
+  --separator: rgba(255,255,255,0.08);
+  --separator-faint: rgba(255,255,255,0.05);
+  --label: #f5f5f7;
+  --label-secondary: rgba(235,235,245,0.6);
+  --label-tertiary: rgba(235,235,245,0.3);
+  --accent: #0a84ff;
+  --selection-focused: #0a84ff;
+  --selection-unfocused: rgba(255,255,255,0.08);
+  --sidebar-selection: rgba(255,255,255,0.08);
+}
+
+html, body, #root {
+  margin: 0; padding: 0;
+  width: 100%; height: 100%;
+  background: var(--desktop-bg);
+  color: var(--label);
+  font-family: system-ui, -apple-system, "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+* { box-sizing: border-box; }
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); border: 2px solid transparent; background-clip: padding-box; }
+
+.sort-header {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  cursor: default;
+  user-select: none;
+  font-weight: 500;
+}
+.sort-header:hover { background: rgba(255,255,255,0.03); }
+
+/* Subtle desktop ambience: deep gradient backdrop */
+body {
+  background: radial-gradient(ellipse at 30% 20%, #1a1a1f 0%, #0a0a0c 60%) fixed;
+}
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="sidebar.jsx"></script>
+<script type="text/babel" src="preview.jsx"></script>
+<script type="text/babel" src="pane.jsx"></script>
+<script type="text/babel" src="toolbar.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
