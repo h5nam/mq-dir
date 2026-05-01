@@ -1,0 +1,72 @@
+name: mq-dir
+options:
+  bundleIdPrefix: com.mqdir
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+
+targets:
+  mq-dir:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleIdentifier: com.mqdir.app
+        CFBundleDisplayName: mq-dir
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.utilities
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSDesktopFolderUsageDescription: mq-dir needs access to your Desktop to browse files there.
+        NSDocumentsFolderUsageDescription: mq-dir needs access to your Documents to browse files there.
+        NSDownloadsFolderUsageDescription: mq-dir needs access to your Downloads to browse files there.
+        NSRemovableVolumesUsageDescription: mq-dir needs access to your removable volumes to browse files there.
+        NSNetworkVolumesUsageDescription: mq-dir needs access to your network volumes to browse files there.
+    entitlements:
+      path: mq-dir.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mqdir.app
+        PRODUCT_NAME: mq-dir
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_PREVIEWS: YES
+      configs:
+        Sandboxed:
+          CODE_SIGN_ENTITLEMENTS: mq-dir-sandboxed.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MQDIR_SANDBOXED"
+
+configs:
+  Debug: debug
+  Release: release
+  Sandboxed: release
+
+schemes:
+  mq-dir:
+    build:
+      targets:
+        mq-dir: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    archive:
+      config: Release
