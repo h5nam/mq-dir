@@ -15,7 +15,7 @@
 
 ## Status: M1 in progress
 
-This is **pre-alpha**. M0 is complete. M1 has started with a single-pane folder picker and read-only file list. Persistence, QuickLook, NSTableView column autosave, and the full M1 acceptance criteria are still in progress.
+This is **pre-alpha**. M0 is complete. M1 has started with a folder picker and read-only file list. A lightweight 1/2/4-pane shell is already present so the app opens with the expected Q-Dir shape, but persistence, QuickLook, NSTableView column autosave, and the full M1 acceptance criteria are still in progress.
 
 The full roadmap and architecture decisions live in [`/.omc/plans/ralplan-mq-dir-v1.md`](.omc/plans/ralplan-mq-dir-v1.md).
 
