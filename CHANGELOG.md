@@ -9,6 +9,18 @@ versioning once public releases begin.
 
 (none)
 
+## [0.1.0-alpha.3] - 2026-05-02
+
+### Fixed
+
+- App icon and localized strings now actually ship inside the `.app`
+  bundle. XcodeGen treats the top-level `resources:` key differently than
+  `sources:` and silently skipped `Resources/` in alpha.1 and alpha.2, so
+  every prior dmg shipped without an `AppIcon.icns` or `Assets.car` —
+  hence the generic Dock icon. Moved `Resources/` under `sources:` so
+  XcodeGen recurses and registers `Assets.xcassets` and `en.lproj` into
+  the proper build phases.
+
 ## [0.1.0-alpha.2] - 2026-05-02
 
 ### Added
