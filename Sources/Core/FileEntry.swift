@@ -9,12 +9,12 @@ struct FileEntry: Identifiable, Hashable, Sendable {
     let kind: String
     let isHidden: Bool
 
-    var id: String {
-        url.path
-    }
+    // URL-based id avoids collisions on case-insensitive APFS volumes where
+    // `url.path` would normalize "Foo.txt" and "foo.txt" to the same string.
+    var id: URL { url }
 }
 
-enum FileEntrySortKey: String, CaseIterable, Sendable {
+enum FileEntrySortKey: String, CaseIterable, Codable, Sendable {
     case name
     case modified
     case size
