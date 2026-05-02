@@ -4,7 +4,7 @@
 
 ![status: pre-alpha (M1 in progress)](https://img.shields.io/badge/status-pre--alpha%20M1-orange)
 
-> _Screenshots coming after M1 ships._
+![mq-dir hero](docs/readme_hero.png)
 
 ## Why mq-dir?
 
@@ -17,7 +17,7 @@
 
 This is **pre-alpha**. M0 is complete. M1 has started with a folder picker and read-only file list. A lightweight 1/2/4-pane shell is already present so the app opens with the expected Q-Dir shape, but persistence, QuickLook, NSTableView column autosave, and the full M1 acceptance criteria are still in progress.
 
-The full roadmap and architecture decisions live in [`/.omc/plans/ralplan-mq-dir-v1.md`](.omc/plans/ralplan-mq-dir-v1.md).
+The roadmap below summarises where the project is headed.
 
 ## Build from source
 

@@ -1,0 +1,8 @@
+# Vercel local link state
+.vercel
+
+# OMC runtime droppings (from local http.server runs etc.)
+.omc/
+
+# macOS noise
+.DS_Store

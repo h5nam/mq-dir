@@ -1,0 +1,13 @@
+# Generated PNGs are not source — regenerate via `python gen.py`.
+# When an asset is finalized for release, copy the master into a tracked
+# location (e.g. Resources/Assets.xcassets/AppIcon.appiconset/) and that
+# copy IS tracked.
+output/
+
+# Local API key
+.env
+
+# Python venv
+.venv/
+__pycache__/
+*.pyc

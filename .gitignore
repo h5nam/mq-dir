@@ -2,6 +2,7 @@
 build/
 DerivedData/
 .build/
+.build-app/
 .swiftpm/
 Packages/
 Pods/
@@ -26,7 +27,16 @@ xcuserdata/
 # Homebrew tap working tree (kept locally only)
 Casks/.brew/
 
-# OMX / OMC runtime state
+# OMC / OMX runtime state and internal planning docs — never published.
+# .omc/plans/ contains internal consensus drafts, agent reviews, and
+# trade-off discussions that are not appropriate for a public OSS repo.
+.omc/
 .omx/
-.omc/state/
-.omc/sessions/
+
+# Vercel local link state (project + org IDs)
+.vercel/
+
+# Python tooling (Brandkit, scripts)
+__pycache__/
+*.pyc
+.venv/
