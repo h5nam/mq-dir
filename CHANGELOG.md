@@ -9,6 +9,17 @@ versioning once public releases begin.
 
 (none)
 
+## [0.1.0-alpha.5] - 2026-05-02
+
+### Fixed
+
+- Icon Dock framing: alpha.4 still showed a hard dark outline because the
+  AI-baked glass squircle had a near-black rim that the squircle alpha
+  mask alone could not dissolve. The refine pass now combines the squircle
+  mask with a luminance-driven alpha fade (luma 12 fully transparent, 38+
+  fully opaque) so the rim dissolves smoothly while the interior glass
+  shading and 4-pane cells stay intact.
+
 ## [0.1.0-alpha.4] - 2026-05-02
 
 ### Fixed

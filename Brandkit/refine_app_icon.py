@@ -19,7 +19,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "output" / "app_icon_master.png"
@@ -70,6 +70,23 @@ def squircle_mask(canvas: int, radius: int) -> Image.Image:
     return m
 
 
+# Pixels darker than DARK_LUMA become fully transparent. Pixels between
+# DARK_LUMA and OPAQUE_LUMA fade linearly. This dissolves the dark glass rim
+# the AI baked into the squircle outline so it doesn't read as a hard frame
+# in the Dock; brighter glass interior pixels stay fully opaque.
+DARK_LUMA = 12
+OPAQUE_LUMA = 38
+
+
+def luminance_alpha(im: Image.Image) -> Image.Image:
+    gray = im.convert("L")
+    return gray.point(
+        lambda v: 0 if v < DARK_LUMA
+        else 255 if v >= OPAQUE_LUMA
+        else int((v - DARK_LUMA) * 255 / (OPAQUE_LUMA - DARK_LUMA))
+    )
+
+
 def main() -> int:
     if not SRC.exists():
         raise SystemExit(f"ERROR: {SRC} not found. Run gen.py app_icon first.")
@@ -82,12 +99,20 @@ def main() -> int:
     bbox = detect_design_bbox(src)
     cropped = square_crop_with_margin(src, bbox)
     fitted = cropped.resize((CANVAS, CANVAS), Image.LANCZOS).convert("RGBA")
-    fitted.putalpha(squircle_mask(CANVAS, CORNER_RADIUS))
+    # Combine luma-based alpha with the squircle outline. Darker(a, b) keeps
+    # the more transparent value at every pixel: dark rim fades out, plus
+    # the squircle still trims the corners cleanly.
+    final_alpha = ImageChops.darker(
+        luminance_alpha(fitted),
+        squircle_mask(CANVAS, CORNER_RADIUS),
+    )
+    fitted.putalpha(final_alpha)
     fitted.save(SRC, format="PNG")
     print(
         f"refined: {SRC.name} "
         f"(crop {bbox} → {cropped.size[0]}px square → {CANVAS}x{CANVAS}, "
-        f"squircle radius {CORNER_RADIUS}px)"
+        f"squircle radius {CORNER_RADIUS}px, "
+        f"luma fade {DARK_LUMA}→{OPAQUE_LUMA})"
     )
     print("next: python3 Brandkit/postprocess.py")
     return 0
