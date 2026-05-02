@@ -9,6 +9,20 @@ versioning once public releases begin.
 
 (none)
 
+## [0.1.0-alpha.4] - 2026-05-02
+
+### Fixed
+
+- App icon no longer renders with a hard black square frame in the Dock.
+  The AI-generated `app_icon_master.png` had a small glassmorphism squircle
+  floating on a solid black 1024x1024 background, and macOS Dock paints the
+  PNG verbatim. Added `Brandkit/refine_app_icon.py` (Pillow-only) which
+  detects the design's bounding box, fits it tightly into the canvas, and
+  applies an Apple-style rounded-rectangle alpha mask so the corners go
+  cleanly transparent. The 10 sized variants under
+  `Resources/Assets.xcassets/AppIcon.appiconset/` are regenerated from the
+  refined master via the existing `Brandkit/postprocess.py` pipeline.
+
 ## [0.1.0-alpha.3] - 2026-05-02
 
 ### Fixed
