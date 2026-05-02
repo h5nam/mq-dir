@@ -7,5 +7,11 @@ extension Notification.Name {
     static let mqdirReloadRequested = Notification.Name("mqdir.reloadRequested")
     static let mqdirParentFolderRequested = Notification.Name("mqdir.parentFolderRequested")
     static let mqdirToggleHiddenFilesRequested = Notification.Name("mqdir.toggleHiddenFilesRequested")
+    static let mqdirGoBackRequested = Notification.Name("mqdir.goBackRequested")
+    static let mqdirGoForwardRequested = Notification.Name("mqdir.goForwardRequested")
+    static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
+    /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
+    /// so the active window can flush a synchronous save before exit.
+    static let mqdirAppWillTerminate = Notification.Name("mqdir.appWillTerminate")
 }
 

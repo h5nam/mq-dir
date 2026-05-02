@@ -18,6 +18,10 @@ struct MenuCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
+            Button("Back") { post(.mqdirGoBackRequested) }
+                .keyboardShortcut("[", modifiers: .command)
+            Button("Forward") { post(.mqdirGoForwardRequested) }
+                .keyboardShortcut("]", modifiers: .command)
             Button("Reload") { post(.mqdirReloadRequested) }
                 .keyboardShortcut("r", modifiers: .command)
             Button("Parent Folder") { post(.mqdirParentFolderRequested) }
