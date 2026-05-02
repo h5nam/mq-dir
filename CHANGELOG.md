@@ -11,6 +11,17 @@ versioning once public releases begin.
 
 ## [0.1.0-alpha.5] - 2026-05-02
 
+### Changed
+
+- Repository reorganised into a standard public OSS layout: app sources
+  under `Sources/mq-dir/`, headless library under `Sources/mqdirCore/`
+  (Package.swift target path updated), entitlements consolidated under
+  `Resources/Entitlements/`, brand toolkit moved to `Scripts/brandkit/`,
+  and README/social assets to `.github/assets/`. project.yml and
+  Package.swift catch up to the new paths.
+- README hero image link points to `.github/assets/readme_hero.png` so
+  the rendered README on github.com no longer shows a broken image.
+
 ### Fixed
 
 - Icon Dock framing: alpha.4 still showed a hard dark outline because the

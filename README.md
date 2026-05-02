@@ -4,7 +4,7 @@
 
 ![status: pre-alpha (M1 in progress)](https://img.shields.io/badge/status-pre--alpha%20M1-orange)
 
-![mq-dir hero](docs/readme_hero.png)
+![mq-dir hero](.github/assets/readme_hero.png)
 
 ## Why mq-dir?
 
