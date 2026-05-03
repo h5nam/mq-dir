@@ -17,6 +17,11 @@ struct MenuCommands: Commands {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
         }
 
+        CommandGroup(after: .textEditing) {
+            Button("Find") { post(.mqdirFocusSearchRequested) }
+                .keyboardShortcut("f", modifiers: .command)
+        }
+
         CommandGroup(after: .toolbar) {
             Button("Back") { post(.mqdirGoBackRequested) }
                 .keyboardShortcut("[", modifiers: .command)

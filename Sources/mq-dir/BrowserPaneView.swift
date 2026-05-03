@@ -87,7 +87,7 @@ struct BrowserPaneView: View {
                     .foregroundStyle(Theme.Color.label)
                 Text("—")
                     .foregroundStyle(Theme.Color.labelTertiary)
-                Text("\(viewModel.entries.count) item\(viewModel.entries.count == 1 ? "" : "s")")
+                Text(itemCountLabel)
                     .foregroundStyle(Theme.Color.labelSecondary)
             } else {
                 Text("No folder open")
@@ -101,6 +101,40 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separatorFaint).frame(height: 0.5)
         }
+    }
+
+    private var itemCountLabel: String {
+        if viewModel.isFiltering {
+            if viewModel.isSearching { return "searching\u{2026}" }
+            let count = viewModel.visibleEntries.count
+            return "\(count) match\(count == 1 ? "" : "es")"
+        }
+        let total = viewModel.entries.count
+        return "\(total) item\(total == 1 ? "" : "s")"
+    }
+
+    private var emptyStateLabel: String {
+        if viewModel.isFiltering {
+            if viewModel.isSearching { return "Searching\u{2026}" }
+            let trimmed = viewModel.searchQuery.trimmingCharacters(in: .whitespaces)
+            return "No matches for \u{201C}\(trimmed)\u{201D}"
+        }
+        return "No items"
+    }
+
+    /// While a recursive search is active, show the entry's parent folder
+    /// path relative to the search root so users can tell which subfolder a
+    /// hit lives in. Direct children of the search root get no subtitle.
+    private func searchSubtitle(for entry: FileEntry) -> String? {
+        guard viewModel.isFiltering, let root = viewModel.folderURL else { return nil }
+        let parent = entry.url.deletingLastPathComponent()
+        guard parent != root else { return nil }
+        let rootPrefix = root.path(percentEncoded: false)
+        let parentPath = parent.path(percentEncoded: false)
+        guard parentPath.hasPrefix(rootPrefix) else { return parentPath }
+        let stripped = parentPath.dropFirst(rootPrefix.count)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return stripped.isEmpty ? nil : stripped
     }
 
     // MARK: Column header
@@ -227,7 +261,7 @@ struct BrowserPaneView: View {
     private var fileList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(viewModel.entries) { entry in
+                ForEach(viewModel.visibleEntries) { entry in
                     rowView(for: entry)
                 }
             }
@@ -236,8 +270,8 @@ struct BrowserPaneView: View {
         .overlay {
             if viewModel.isLoading {
                 ProgressView().controlSize(.small)
-            } else if viewModel.entries.isEmpty {
-                Text("No items")
+            } else if viewModel.visibleEntries.isEmpty {
+                Text(emptyStateLabel)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.Color.labelTertiary)
             }
@@ -273,7 +307,8 @@ struct BrowserPaneView: View {
             isSelected: isSelected,
             paneIsFocused: isFocused,
             isDropTarget: isRowDropTarget,
-            columnWidths: viewModel.columnWidths
+            columnWidths: viewModel.columnWidths,
+            subtitle: searchSubtitle(for: entry)
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { viewModel.open(entry) }
@@ -342,6 +377,9 @@ private struct FileEntryRow: View {
     let paneIsFocused: Bool
     let isDropTarget: Bool
     let columnWidths: PaneColumnWidths
+    /// Optional second line under the name — used by recursive search to show
+    /// where in the tree a hit lives. `nil` keeps the row at single-line height.
+    let subtitle: String?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -352,11 +390,20 @@ private struct FileEntryRow: View {
                                      ? Color.white
                                      : FileIconStyle.tint(for: entry))
                     .frame(width: 14)
-                Text(entry.name)
-                    .font(Theme.Font.body)
-                    .foregroundStyle(textColor)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.name)
+                        .font(Theme.Font.body)
+                        .foregroundStyle(textColor)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 9))
+                            .foregroundStyle(secondaryColor)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -388,7 +435,8 @@ private struct FileEntryRow: View {
                 .frame(width: columnWidths.kind, alignment: .leading)
         }
         .padding(.horizontal, 6)
-        .frame(height: Theme.Metrics.rowHeight)
+        .padding(.vertical, subtitle == nil ? 0 : 2)
+        .frame(minHeight: Theme.Metrics.rowHeight)
         .background(
             ZStack {
                 RoundedRectangle(cornerRadius: 4)

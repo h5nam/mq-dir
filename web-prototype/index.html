@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>mq-dir — A file manager that remembers</title>
+<title>mq-dir — A file manager for AI multi-taskers</title>
 
 <!-- Favicons & Apple touch icon -->
 <link rel="icon" type="image/png" sizes="32x32" href="img/favicon_32.png" />
@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="img/favicon_180.png" />
 
 <!-- Description -->
-<meta name="description" content="Quad-pane macOS file manager. The file manager that remembers — sort, scroll, view mode, every tab survive every relaunch. Open source, MIT, no telemetry." />
+<meta name="description" content="Quad-pane macOS file manager for AI multi-taskers. Parallel agents, parallel projects, persistent state across launches. Open source, MIT, no telemetry." />
 
 <!-- Canonical -->
 <link rel="canonical" href="https://mqdir.com/" />
@@ -20,8 +20,8 @@
 <!-- OpenGraph -->
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://mqdir.com/" />
-<meta property="og:title" content="mq-dir — A file manager that remembers" />
-<meta property="og:description" content="Quad-pane macOS file manager for power users. Native, dark, opinionated, open source." />
+<meta property="og:title" content="mq-dir — A file manager for AI multi-taskers" />
+<meta property="og:description" content="Quad-pane macOS file manager built for AI multi-taskers. Native, dark, persistent, open source." />
 <meta property="og:image" content="https://mqdir.com/img/og_card.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
@@ -29,8 +29,8 @@
 <!-- Twitter card -->
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:url" content="https://mqdir.com/" />
-<meta name="twitter:title" content="mq-dir — A file manager that remembers" />
-<meta name="twitter:description" content="Quad-pane macOS file manager for power users. Native, dark, opinionated, open source." />
+<meta name="twitter:title" content="mq-dir — A file manager for AI multi-taskers" />
+<meta name="twitter:description" content="Quad-pane macOS file manager built for AI multi-taskers. Native, dark, persistent, open source." />
 <meta name="twitter:image" content="https://mqdir.com/img/og_card.png" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -107,26 +107,17 @@ nav {
   justify-content: space-between;
 }
 .brand {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center;
   font-weight: 600;
   font-size: 14px;
   letter-spacing: -0.01em;
 }
-.brand-mark {
-  width: 22px; height: 22px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, #2b6dd0 0%, #5e9eff 100%);
-  display: flex; align-items: center; justify-content: center;
-  position: relative;
-  box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.15), 0 1px 2px rgba(0,0,0,0.4);
+.brand-wordmark {
+  height: 30px;
+  width: auto;
+  display: block;
+  /* wordmark image already contains the "mq-dir" text */
 }
-.brand-mark::before, .brand-mark::after {
-  content: ""; position: absolute;
-  background: rgba(255,255,255,0.92);
-  border-radius: 1px;
-}
-.brand-mark::before { top: 5px; left: 5px; width: 5px; height: 5px; }
-.brand-mark::after  { top: 5px; right: 5px; width: 5px; height: 5px; box-shadow: 0 7px 0 rgba(255,255,255,0.92), -7px 7px 0 rgba(255,255,255,0.92); }
 
 .nav-links { display: flex; gap: 28px; font-size: 13px; color: var(--text-secondary); }
 .nav-links a:hover { color: var(--text); }
@@ -145,8 +136,15 @@ nav {
 }
 .btn-ghost { background: transparent; color: var(--text-secondary); border-color: var(--border); }
 .btn-ghost:hover { background: rgba(255,255,255,0.04); color: var(--text); }
-.btn-primary { background: var(--text); color: #0a0a0c; }
+.btn-primary {
+  background: var(--text); color: #0a0a0c;
+  border-radius: 999px; padding: 0 18px;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.04);
+}
 .btn-primary:hover { background: #fff; }
+.btn-primary .apple { width: 14px; height: 14px; flex-shrink: 0; margin-right: -2px; transform: translateY(-0.5px); }
+.btn-primary .apple svg { width: 100%; height: 100%; display: block; fill: #0a0a0c; }
 .btn-primary kbd { font-family: var(--mono); font-size: 11px; opacity: 0.5; }
 
 /* ── HERO ─────────────────────────────────────────────── */
@@ -195,7 +193,9 @@ nav {
   line-height: 1.55;
 }
 .hero-cta { display: inline-flex; gap: 10px; }
-.btn-lg { height: 40px; padding: 0 18px; font-size: 14px; border-radius: 8px; }
+.btn-lg { height: 44px; padding: 0 22px; font-size: 14px; border-radius: 8px; }
+.btn-lg.btn-primary { padding: 0 24px; }
+.btn-lg.btn-primary .apple { width: 17px; height: 17px; }
 
 .hero-meta {
   margin-top: 22px;
@@ -233,7 +233,7 @@ section { position: relative; z-index: 1; padding: 96px 0; }
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--text-tertiary);
   margin-bottom: 16px;
 }
 .section-title {
@@ -251,75 +251,168 @@ section { position: relative; z-index: 1; padding: 96px 0; }
   line-height: 1.55;
 }
 
-/* ── PROMISE (state persistence) ──────────────────────── */
-.promise {
+/* ── PROBLEM (the gap) ────────────────────────────────── */
+.problem {
   border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, transparent, rgba(94,158,255,0.025), transparent);
+  padding: 96px 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(255,69,58,0.03) 50%, transparent 100%);
 }
-.promise-grid {
-  margin-top: 64px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 32px;
-}
-.promise-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 28px;
-  background: var(--bg-card);
-  position: relative;
-  overflow: hidden;
-}
-.promise-card .label {
+.problem-stat {
   font-family: var(--mono);
   font-size: 11px;
+  color: var(--red);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-tertiary);
-  margin-bottom: 18px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  margin-bottom: 16px;
 }
-.promise-card.before .label { color: var(--text-tertiary); }
-.promise-card.after .label  { color: var(--accent); }
-.promise-card h3 { font-size: 20px; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.015em; }
-.promise-card p  { color: var(--text-secondary); font-size: 14px; line-height: 1.55; margin-bottom: 24px; }
-.promise-mock {
-  height: 200px;
-  border-radius: 8px;
+.problem h2 {
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  max-width: 880px;
+  margin-bottom: 28px;
+}
+.problem h2 strike {
+  text-decoration: line-through;
+  text-decoration-color: rgba(255,69,58,0.5);
+  color: var(--text-tertiary);
+}
+.problem-lede { font-size: 17px; color: var(--text-secondary); max-width: 720px; line-height: 1.6; }
+
+.problem-grid {
+  margin-top: 64px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
   border: 1px solid var(--border);
-  background: #0a0a0c;
+  border-radius: 14px;
   overflow: hidden;
+}
+.prob-card {
+  background: var(--bg-card);
+  padding: 28px;
   position: relative;
 }
-.mock-titlebar {
-  height: 22px; padding: 0 8px;
-  display: flex; align-items: center; gap: 5px;
+.prob-card .num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+  letter-spacing: 0.1em;
+  margin-bottom: 16px;
+}
+.prob-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 12px; letter-spacing: -0.015em; }
+.prob-card p  { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.prob-card .visual {
+  margin-top: 20px;
+  height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0a0a0c;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Finder reset visual */
+.vis-finder-reset { display: flex; align-items: center; justify-content: center; gap: 18px; height: 100%; }
+.vis-finder-reset .frame {
+  width: 70px; height: 56px;
+  background: #131316;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex; flex-direction: column;
+  font-family: var(--mono); font-size: 8px;
+  overflow: hidden;
+}
+.vis-finder-reset .frame .h {
+  height: 10px; background: rgba(255,255,255,0.04);
   border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 4px; gap: 2px;
+}
+.vis-finder-reset .frame .h i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-quaternary); }
+.vis-finder-reset .frame .row { padding: 1px 4px; color: var(--text-tertiary); border-bottom: 0.5px solid rgba(255,255,255,0.03); height: 10px; display: flex; align-items: center; }
+.vis-finder-reset .arrow { color: var(--text-quaternary); font-family: var(--mono); font-size: 10px; }
+
+/* IDE blind spot visual */
+.vis-ide {
+  display: flex; height: 100%;
+  font-family: var(--mono); font-size: 9px;
+}
+.vis-ide .tree {
+  width: 40%;
   background: rgba(255,255,255,0.02);
-}
-.mock-titlebar i { width: 10px; height: 10px; border-radius: 50%; }
-.mock-titlebar i.r { background: #ff5f57; }
-.mock-titlebar i.y { background: #febc2e; }
-.mock-titlebar i.g { background: #28c840; }
-.mock-row {
-  height: 18px; padding: 0 10px;
-  display: flex; align-items: center; gap: 8px;
-  font-family: var(--mono); font-size: 10px;
+  border-right: 1px solid var(--border);
+  padding: 6px 8px;
   color: var(--text-secondary);
-  border-bottom: 0.5px solid rgba(255,255,255,0.04);
+  display: flex; flex-direction: column; gap: 2px;
 }
-.mock-row .ic { width: 9px; height: 11px; background: var(--text-quaternary); border-radius: 1px; flex-shrink: 0; }
-.mock-row .name { flex: 1; }
-.mock-row .meta { color: var(--text-tertiary); font-size: 9px; }
-.mock-row.sel { background: rgba(94,158,255,0.18); color: var(--text); }
-.mock-row.sel .meta { color: rgba(255,255,255,0.7); }
-.mock-empty {
-  display: flex; align-items: center; justify-content: center;
-  height: 100%;
-  color: var(--text-tertiary); font-size: 12px; font-family: var(--mono);
+.vis-ide .tree .l { color: var(--text); }
+.vis-ide .tree .l-img { color: var(--text-tertiary); position: relative; }
+.vis-ide .tree .l-img::after { content: "?"; position: absolute; right: 4px; color: var(--red); }
+.vis-ide .editor {
+  flex: 1; padding: 6px 8px;
+  color: var(--accent-bright);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.vis-ide .editor .c { color: var(--text-tertiary); }
+.vis-ide .editor .k { color: #ff7ab2; }
+
+/* Multi-window chaos visual */
+.vis-chaos { position: relative; height: 100%; }
+.vis-chaos .win {
+  position: absolute;
+  background: #131316;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  width: 50px; height: 36px;
+}
+.vis-chaos .win.w1 { top: 10px; left: 30px; transform: rotate(-3deg); background: linear-gradient(135deg, #ff9f0a, #ff453a); }
+.vis-chaos .win.w2 { top: 18px; left: 70px; transform: rotate(2deg); }
+.vis-chaos .win.w3 { top: 8px; left: 110px; transform: rotate(-2deg); background: #f8f5f0; }
+.vis-chaos .win.w4 { top: 22px; left: 150px; transform: rotate(4deg); }
+.vis-chaos .win.w5 { top: 14px; left: 190px; transform: rotate(-3deg); background: #14141a; }
+
+/* ── SHIFT (the answer) ───────────────────────────────── */
+.shift {
+  border-top: 1px solid var(--border);
+  padding: 96px 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(94,158,255,0.04) 100%);
+}
+.shift-eyebrow {
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+}
+.shift h2 {
+  font-size: clamp(32px, 4.4vw, 56px);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+  max-width: 880px;
+  margin-bottom: 24px;
+}
+.shift-lede { font-size: 18px; color: var(--text-secondary); max-width: 680px; line-height: 1.55; }
+
+.shift-shot-wrap {
+  margin-top: 64px;
+  position: relative;
+  perspective: 2000px;
+}
+.shift-shot-glow {
+  position: absolute; inset: -40px;
+  background: radial-gradient(ellipse at top, rgba(94,158,255,0.18), transparent 60%);
+  filter: blur(40px);
+  z-index: -1;
+}
+.shift-shot {
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.08),
+    0 30px 80px rgba(0,0,0,0.7),
+    0 8px 24px rgba(0,0,0,0.5);
 }
 
 /* ── FEATURE GRID ─────────────────────────────────────── */
@@ -462,15 +555,19 @@ section { position: relative; z-index: 1; padding: 96px 0; }
 }
 .download p { color: var(--text-secondary); font-size: 17px; margin-bottom: 36px; max-width: 480px; margin-left: auto; margin-right: auto; }
 .download-btn {
-  display: inline-flex; align-items: center; gap: 12px;
+  display: inline-flex; align-items: center; gap: 10px;
   height: 52px; padding: 0 28px;
   background: var(--text); color: #0a0a0c;
-  border-radius: 10px;
+  border-radius: 999px;
   font-size: 16px; font-weight: 500;
   letter-spacing: -0.005em;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.04);
+  transition: background 120ms ease, transform 120ms ease;
 }
 .download-btn:hover { background: #fff; }
+.download-btn .apple { width: 19px; height: 19px; flex-shrink: 0; margin-right: -2px; transform: translateY(-1px); }
+.download-btn .apple svg { width: 100%; height: 100%; display: block; fill: #0a0a0c; }
 .download-meta {
   margin-top: 20px;
   display: flex; gap: 20px; justify-content: center;
@@ -570,7 +667,8 @@ footer {
 .app-sb .sb-section { padding: 6px 12px 4px; font-size: 10px; font-weight: 700; color: rgba(235,235,245,0.3); letter-spacing: 0.5px; text-transform: uppercase; }
 .app-sb .sb-item { padding: 4px 14px; color: rgba(235,235,245,0.85); display: flex; align-items: center; gap: 6px; height: 22px; }
 .app-sb .sb-item.active { background: rgba(255,255,255,0.06); border-radius: 4px; margin: 0 6px; padding-left: 10px; }
-.app-sb .sb-item .ico { width: 12px; height: 12px; border-radius: 2px; background: var(--accent); opacity: 0.8; flex-shrink: 0; }
+.app-sb .sb-item .ico { width: 13px; height: 13px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+.app-sb .sb-item .ico svg { width: 100%; height: 100%; display: block; }
 .app-sb .sb-item .tag-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
 .app-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; background: rgba(255,255,255,0.08); }
@@ -579,7 +677,8 @@ footer {
 .app-tabs { height: 26px; background: rgba(0,0,0,0.18); border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; }
 .app-tab { display: flex; align-items: center; gap: 6px; padding: 0 10px; height: 100%; font-size: 11px; color: rgba(235,235,245,0.6); border-right: 1px solid rgba(255,255,255,0.05); }
 .app-tab.active { background: rgba(255,255,255,0.04); color: #f5f5f7; }
-.app-tab .ic { width: 9px; height: 11px; background: #5aa3f0; border-radius: 1px; }
+.app-tab .ic { width: 11px; height: 11px; display: inline-flex; align-items: center; justify-content: center; }
+.app-tab .ic svg { width: 100%; height: 100%; display: block; }
 .app-header { height: 20px; padding: 0 10px; font-size: 10px; color: rgba(235,235,245,0.6); display: flex; align-items: center; gap: 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
 .app-header b { color: #f5f5f7; font-weight: 500; }
 .app-cols { height: 20px; display: flex; padding: 0 8px; font-size: 10px; color: rgba(235,235,245,0.6); border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.12); align-items: center; }
@@ -589,16 +688,8 @@ footer {
 .app-cols span:nth-child(3) { width: 50px; text-align: right; }
 .app-rows { flex: 1; padding: 2px 8px; overflow: hidden; }
 .app-r { height: 20px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #f5f5f7; }
-.app-r .ic { width: 11px; height: 13px; border-radius: 1px; flex-shrink: 0; }
-.app-r .ic.f { background: linear-gradient(180deg, #7fbcff, #3a8fe6); border-radius: 2px; }
-.app-r .ic.swift { background: #fa7343; }
-.app-r .ic.pdf { background: #e8453c; }
-.app-r .ic.img { background: #5aa3f0; }
-.app-r .ic.mov { background: #bf5af2; }
-.app-r .ic.zip { background: #8e8e93; }
-.app-r .ic.aud { background: #ff9f0a; }
-.app-r .ic.txt { background: #48484a; }
-.app-r .ic.doc { background: #2b6dd0; }
+.app-r .ic { width: 14px; height: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+.app-r .ic svg { width: 100%; height: 100%; display: block; }
 .app-r .name { flex: 2; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .app-r .date { flex: 1; padding: 0 4px; color: rgba(235,235,245,0.6); font-size: 10px; }
 .app-r .size { width: 50px; text-align: right; color: rgba(235,235,245,0.6); font-size: 10px; }
@@ -621,7 +712,7 @@ footer {
   .features-grid { grid-template-columns: 1fr 1fr; }
   .test-grid { grid-template-columns: 1fr; }
   .download-reqs { grid-template-columns: 1fr 1fr; }
-  .promise-grid { grid-template-columns: 1fr; }
+  .problem-grid { grid-template-columns: 1fr; }
   .demo-wrap { grid-template-columns: 1fr; }
   .demo-steps { position: static; }
   .nav-links { display: none; }
@@ -633,12 +724,12 @@ footer {
 
 <nav>
   <div class="container nav-inner">
-    <a href="#" class="brand">
-      <span class="brand-mark"></span>
-      mq-dir
+    <a href="#" class="brand" aria-label="mq-dir home">
+      <img class="brand-wordmark" src="img/wordmark.png" alt="mq-dir" />
     </a>
     <div class="nav-links">
-      <a href="#promise">Promise</a>
+      <a href="#problem">Gap</a>
+      <a href="#shift">Shift</a>
       <a href="#features">Features</a>
       <a href="#demo">Demo</a>
       <a href="#download">Download</a>
@@ -646,7 +737,10 @@ footer {
     </div>
     <div class="nav-cta">
       <a href="mq-dir.html" class="btn btn-ghost">Open prototype</a>
-      <a href="#download" class="btn btn-primary">Download <kbd>⌘D</kbd></a>
+      <a href="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha/mq-dir-v0.1.0-alpha.dmg" class="btn btn-primary" download>
+        <span class="apple"><svg viewBox="0 0 384 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zM256.9 99.3c25.5-29.5 23.2-71 22.5-77.6-22.6 1.3-48.7 15.4-63.6 32.7-16.4 18.6-26 41.6-23.9 73.1 24.4 1.9 46.7-10.7 65-28.2z"/></svg></span>
+        Download for Mac
+      </a>
     </div>
   </div>
 </nav>
@@ -660,10 +754,13 @@ footer {
       <span class="ver">·</span>
       <span class="ver">macOS 14+</span>
     </div>
-    <h1>The file manager<br/>that <em>remembers</em>.</h1>
-    <p class="lede">A native macOS file manager for power users. Up to four independent panes, persistent state across launches, and the obsessive polish you'd expect from a Mac-first tool.</p>
+    <h1>The file manager for<br/><em>AI multi-tasking</em>.</h1>
+    <p class="lede">A native macOS file manager for AI multi-taskers. Up to four independent panes for parallel projects and agents — persistent state, native polish, no compromise.</p>
     <div class="hero-cta">
-      <a href="#download" class="btn btn-primary btn-lg">Download for macOS</a>
+      <a href="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha/mq-dir-v0.1.0-alpha.dmg" class="btn btn-primary btn-lg" download>
+        <span class="apple"><svg viewBox="0 0 384 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zM256.9 99.3c25.5-29.5 23.2-71 22.5-77.6-22.6 1.3-48.7 15.4-63.6 32.7-16.4 18.6-26 41.6-23.9 73.1 24.4 1.9 46.7-10.7 65-28.2z"/></svg></span>
+        Download for Mac
+      </a>
       <a href="mq-dir.html" class="btn btn-ghost btn-lg">Try the prototype →</a>
     </div>
     <div class="hero-meta">
@@ -679,38 +776,80 @@ footer {
   </div>
 </section>
 
-<!-- PROMISE -->
-<section class="promise" id="promise">
+<!-- PROBLEM (the gap) -->
+<section class="problem" id="problem">
   <div class="container">
-    <div class="section-eyebrow">01 — The promise</div>
-    <h2 class="section-title">The UI you left is the UI you return to.</h2>
-    <p class="section-lede">Sort order, scroll position, column widths, view mode, every open tab, every pane layout — all of it survives quit, relaunch, and force-quit. Memory is a feature, not a bug.</p>
+    <div class="problem-stat">⏵ The gap</div>
+    <h2>Your IDE shows you code. Your agent writes code. <strike>What about everything else?</strike></h2>
+    <p class="problem-lede">A modern coding session is half source, half artifacts. Generated images, recorded demos, PDFs from product, screenshots from QA, exported transcripts, downloaded models, Whisper outputs, design specs. None of it lives where your code does — and the tools you have for it weren't built for this volume.</p>
 
-    <div class="promise-grid">
-      <div class="promise-card before">
-        <div class="label">⏵ Other file managers</div>
-        <h3>Reset on every launch</h3>
-        <p>You open the app and it's a blank slate. Wrong folder, default sort, columns reverted, tabs gone. You spend the first minute of every session re-finding your place.</p>
-        <div class="promise-mock">
-          <div class="mock-titlebar"><i class="r"></i><i class="y"></i><i class="g"></i></div>
-          <div class="mock-empty">~/ — default sort, no tabs, no scroll memory</div>
+    <div class="problem-grid">
+      <div class="prob-card">
+        <div class="num">PROBLEM 01</div>
+        <h3>Finder resets on every relaunch</h3>
+        <p>You navigate to <code style="font-family:var(--mono);font-size:12px;color:var(--accent-bright)">~/Downloads</code>, sort by date, scroll. Quit. Reopen. Default sort, scroll reset, wrong folder. Repeat 30 times a day.</p>
+        <div class="visual vis-finder-reset">
+          <div class="frame">
+            <div class="h"><i></i><i></i><i></i></div>
+            <div class="row">file-1</div>
+            <div class="row">file-2</div>
+            <div class="row" style="background:#0a84ff;color:#fff;">file-3 ←</div>
+          </div>
+          <div class="arrow">→ relaunch →</div>
+          <div class="frame">
+            <div class="h"><i></i><i></i><i></i></div>
+            <div class="row">~/</div>
+            <div class="row">default</div>
+            <div class="row">again</div>
+          </div>
         </div>
       </div>
-      <div class="promise-card after">
-        <div class="label">⏵ mq-dir</div>
-        <h3>Picks up exactly where you left off</h3>
-        <p>Quit at row 47 of <code style="font-family:var(--mono);font-size:12px;color:var(--accent-bright)">~/Downloads</code> sorted by Date Modified descending? Relaunch and you're at row 47, sorted descending, scroll position intact. Force-quit included.</p>
-        <div class="promise-mock">
-          <div class="mock-titlebar"><i class="r"></i><i class="y"></i><i class="g"></i></div>
-          <div class="mock-row"><div class="ic"></div><div class="name">project-notes.txt</div><div class="meta">14:22 · 4 KB</div></div>
-          <div class="mock-row"><div class="ic"></div><div class="name">screenshot-2026.png</div><div class="meta">09:11 · 2.1 MB</div></div>
-          <div class="mock-row sel"><div class="ic" style="background:#fff"></div><div class="name">invoice.pdf</div><div class="meta">Apr 29 · 320 KB</div></div>
-          <div class="mock-row"><div class="ic"></div><div class="name">archive.zip</div><div class="meta">Apr 28 · 15.3 MB</div></div>
-          <div class="mock-row"><div class="ic"></div><div class="name">video-demo.mov</div><div class="meta">Apr 27 · 234 MB</div></div>
-          <div class="mock-row"><div class="ic"></div><div class="name">notes-draft.md</div><div class="meta">Apr 26 · 12 KB</div></div>
-          <div class="mock-row"><div class="ic"></div><div class="name">font-pack.zip</div><div class="meta">Apr 02 · 88 MB</div></div>
+      <div class="prob-card">
+        <div class="num">PROBLEM 02</div>
+        <h3>Your IDE only sees source</h3>
+        <p>VS Code's tree is great for <code style="font-family:var(--mono);font-size:12px;color:var(--accent-bright)">.tsx</code> and <code style="font-family:var(--mono);font-size:12px;color:var(--accent-bright)">.py</code>. But click an image and it opens a tiny preview in a new tab. Click a video and… you can't. Click a PDF and you're back in Finder.</p>
+        <div class="visual vis-ide">
+          <div class="tree">
+            <div class="l">▸ src</div>
+            <div class="l">▸ public</div>
+            <div class="l-img">&nbsp;&nbsp;hero.png</div>
+            <div class="l-img">&nbsp;&nbsp;demo.mov</div>
+            <div class="l-img">&nbsp;&nbsp;spec.pdf</div>
+            <div class="l">README.md</div>
+          </div>
+          <div class="editor">
+            <div class="c">// Hero.tsx</div>
+            <div><span class="k">import</span> Hero <span class="k">from</span></div>
+            <div>&nbsp;&nbsp;'./Hero'</div>
+          </div>
         </div>
       </div>
+      <div class="prob-card">
+        <div class="num">PROBLEM 03</div>
+        <h3>Multiple projects = window soup</h3>
+        <p>Three agents running, four projects open, dozens of artifacts. You alt-tab through Finder windows you forgot you opened. Context is lost between every switch.</p>
+        <div class="visual vis-chaos">
+          <div class="win w1"></div>
+          <div class="win w2"></div>
+          <div class="win w3"></div>
+          <div class="win w4"></div>
+          <div class="win w5"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SHIFT -->
+<section class="shift" id="shift">
+  <div class="container">
+    <div class="shift-eyebrow">⏵ The shift</div>
+    <h2>One window. Four panes.<br>Every project at once.</h2>
+    <p class="shift-lede">Independent folders, tabs, and history per pane. Inline preview for what your IDE can't render. State that survives every quit.</p>
+
+    <div class="shift-shot-wrap">
+      <div class="shift-shot-glow"></div>
+      <div class="shift-shot" id="shift-shot"></div>
     </div>
   </div>
 </section>
@@ -718,9 +857,9 @@ footer {
 <!-- FEATURES -->
 <section id="features">
   <div class="container">
-    <div class="section-eyebrow">02 — Features</div>
-    <h2 class="section-title">Built for the way power users actually work.</h2>
-    <p class="section-lede">Every detail is borrowed from a workflow you already have. Nothing reinvented, nothing decorative.</p>
+    <div class="section-eyebrow">⏵ Features</div>
+    <h2 class="section-title">Native. Fast. Persistent.</h2>
+    <p class="section-lede">Every detail tuned for parallel work. Nothing reinvented, nothing decorative.</p>
 
     <div class="features-grid">
       <div class="feature">
@@ -802,7 +941,7 @@ footer {
 <!-- DEMO SCROLLY -->
 <section class="demo" id="demo">
   <div class="container">
-    <div class="section-eyebrow">03 — In motion</div>
+    <div class="section-eyebrow">⏵ In motion</div>
     <h2 class="section-title">Watch how four panes change everything.</h2>
     <p class="section-lede">Click through the steps, or scroll. Each step is a real interaction in the app.</p>
 
@@ -843,12 +982,12 @@ footer {
 <!-- TESTIMONIALS -->
 <section class="testimonials">
   <div class="container">
-    <div class="section-eyebrow">04 — From the field</div>
-    <h2 class="section-title">Power users have things to say.</h2>
+    <div class="section-eyebrow">⏵ From the field</div>
+    <h2 class="section-title">From devs running multiple agents.</h2>
 
     <div class="test-grid">
       <div class="test-card">
-        <blockquote>"I open <code style="font-family:var(--mono);font-size:13px;color:var(--accent-bright)">~/Projects</code> 40 times a day. mq-dir is the first file manager that doesn't make me re-navigate every time. It just… is, where I left it."</blockquote>
+        <blockquote>"Three Claude sessions writing into three repos, plus a pane for generated assets. mq-dir is the first file manager that holds that context across quits — every pane stays exactly where I left it."</blockquote>
         <div class="test-author">
           <div class="test-avatar">HK</div>
           <div><div class="test-name">Hona Kim</div><div class="test-role">Staff Engineer · Linear</div></div>
@@ -877,9 +1016,9 @@ footer {
   <div class="container">
     <h2>Free. Open source.<br/>Native to macOS.</h2>
     <p>No subscription, no telemetry, no account required. Just a small native app that respects your time.</p>
-    <a href="https://github.com/h5nam/mq-dir/releases/latest" class="download-btn">
-      <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2 V11 M5 8 L8 11 L11 8"/><path d="M3 13 H13"/></svg>
-      Download mq-dir v0.1.0-alpha
+    <a href="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha/mq-dir-v0.1.0-alpha.dmg" class="download-btn" download>
+      <span class="apple"><svg viewBox="0 0 384 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zM256.9 99.3c25.5-29.5 23.2-71 22.5-77.6-22.6 1.3-48.7 15.4-63.6 32.7-16.4 18.6-26 41.6-23.9 73.1 24.4 1.9 46.7-10.7 65-28.2z"/></svg></span>
+      Download for Mac
     </a>
     <div class="download-meta">
       <span>v0.1.0-alpha · 230 KB</span>
@@ -928,6 +1067,105 @@ footer {
 </footer>
 
 <script>
+// ── File-icon helpers (mirror Sources/mq-dir/FileIconStyle.swift) ──
+const FILE_TINTS = {
+  f:     '#4fa3ff',
+  swift: '#fa7343',
+  code:  '#9ca6ff',
+  pdf:   '#e8453c',
+  img:   '#5aa3f0',
+  mov:   '#bf5af2',
+  aud:   '#ff9f0a',
+  zip:   '#8e8e93',
+  txt:   '#8e8e93',
+  doc:   '#2b6dd0',
+  num:   '#32d74b',
+};
+
+function folderIcon(c = FILE_TINTS.f) {
+  return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path d="M1 4.4a1.3 1.3 0 0 1 1.3-1.3h3.2a1 1 0 0 1 .7.3l1 1h5.2a1.3 1.3 0 0 1 1.3 1.3v5.6a1.3 1.3 0 0 1-1.3 1.3H2.3A1.3 1.3 0 0 1 1 11.3z" fill="${c}"/>
+  </svg>`;
+}
+
+function driveIcon(c = '#8e8e93') {
+  return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="1.3" y="5" width="11.4" height="4.5" rx="1" fill="${c}"/>
+    <circle cx="11" cy="7.25" r="0.6" fill="rgba(255,255,255,0.95)"/>
+    <rect x="3" y="6.6" width="3.5" height="0.5" rx="0.2" fill="rgba(255,255,255,0.65)"/>
+    <rect x="3" y="7.6" width="2.4" height="0.5" rx="0.2" fill="rgba(255,255,255,0.5)"/>
+  </svg>`;
+}
+
+function fileIcon(kind) {
+  const c = FILE_TINTS[kind] || FILE_TINTS.txt;
+  const docBody = (fill) => `
+    <path d="M3 1.6h5l2.5 2.5v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9.5a1 1 0 0 1 1-1z" fill="${fill}"/>
+    <path d="M8 1.6v2.6h2.5" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="0.55" stroke-linejoin="round"/>`;
+  const textLines = `
+    <rect x="3.5" y="6.5" width="5.4" height="0.55" rx="0.25" fill="rgba(255,255,255,0.88)"/>
+    <rect x="3.5" y="7.9" width="5.4" height="0.55" rx="0.25" fill="rgba(255,255,255,0.88)"/>
+    <rect x="3.5" y="9.3" width="3.8" height="0.55" rx="0.25" fill="rgba(255,255,255,0.88)"/>`;
+
+  switch (kind) {
+    case 'f':
+      return folderIcon(c);
+    case 'swift':
+    case 'code':
+    case 'txt':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${docBody(c)}${textLines}</svg>`;
+    case 'doc':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${docBody(c)}</svg>`;
+    case 'pdf':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        ${docBody(c)}
+        <rect x="3.5" y="6.4" width="5.4" height="0.7" rx="0.3" fill="rgba(255,255,255,0.95)"/>
+        <rect x="3.5" y="7.9" width="4.4" height="0.7" rx="0.3" fill="rgba(255,255,255,0.95)"/>
+        <rect x="3.5" y="9.4" width="5" height="0.7" rx="0.3" fill="rgba(255,255,255,0.95)"/>
+      </svg>`;
+    case 'img':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="1.5" y="2.7" width="11" height="8.6" rx="1.4" fill="${c}"/>
+        <circle cx="4.6" cy="5.4" r="0.95" fill="rgba(255,255,255,0.97)"/>
+        <path d="M2.2 10.6 L5.6 7.2 L7.5 9.1 L9.4 7.4 L12.5 10.4 v0.5 a0.7 0.7 0 0 1-0.7 0.7 H2.2 z" fill="rgba(255,255,255,0.95)"/>
+      </svg>`;
+    case 'mov':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="1.5" y="2.7" width="11" height="8.6" rx="1.4" fill="${c}"/>
+        <path d="M5.7 5.1 L9.3 7 L5.7 8.9 z" fill="rgba(255,255,255,0.97)"/>
+      </svg>`;
+    case 'aud':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g fill="${c}">
+          <rect x="1.6"  y="6.2" width="1.1" height="1.6" rx="0.5"/>
+          <rect x="3.3"  y="5"   width="1.1" height="4"   rx="0.5"/>
+          <rect x="5"    y="3.3" width="1.1" height="7.4" rx="0.5"/>
+          <rect x="6.7"  y="4.6" width="1.1" height="4.8" rx="0.5"/>
+          <rect x="8.4"  y="2.5" width="1.1" height="9"   rx="0.5"/>
+          <rect x="10.1" y="5.4" width="1.1" height="3.2" rx="0.5"/>
+          <rect x="11.8" y="6.4" width="1.1" height="1.2" rx="0.5"/>
+        </g>
+      </svg>`;
+    case 'zip':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        ${docBody(c)}
+        <path d="M6.3 1.6 V13" stroke="rgba(255,255,255,0.85)" stroke-width="0.55" stroke-dasharray="0.7 0.7"/>
+        <rect x="5.6" y="9.2" width="1.5" height="2.2" rx="0.35" fill="rgba(255,255,255,0.95)"/>
+      </svg>`;
+    case 'num':
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="1.5" y="2.7" width="11" height="8.6" rx="1.4" fill="${c}"/>
+        <g stroke="rgba(255,255,255,0.95)" stroke-width="0.6">
+          <line x1="1.5" y1="5.6" x2="12.5" y2="5.6"/>
+          <line x1="1.5" y1="8.4" x2="12.5" y2="8.4"/>
+          <line x1="7" y1="2.7" x2="7" y2="11.3"/>
+        </g>
+      </svg>`;
+    default:
+      return `<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${docBody(c)}</svg>`;
+  }
+}
+
 // ── App-screenshot template ─────────────────────────────────────
 function appScreenshot({ paneCount = 4, showPreview = false, focusedPane = 0 } = {}) {
   const panes = [
@@ -942,7 +1180,7 @@ function appScreenshot({ paneCount = 4, showPreview = false, focusedPane = 0 } =
     ]},
     { folder: 'Documents', tab: 'Documents', items: [
       { ic: 'doc', name: 'report-q1.docx',        date: 'Today 09:30', size: '44 KB' },
-      { ic: 'aud', name: 'budget-2026.numbers',   date: 'Apr 29',      size: '102 KB' },
+      { ic: 'num', name: 'budget-2026.numbers',   date: 'Apr 29',      size: '102 KB' },
       { ic: 'pdf', name: 'msa-acme-2026.pdf',     date: 'Apr 22',      size: '482 KB' },
       { ic: 'txt', name: 'notes-draft.md',        date: 'Apr 26',      size: '12 KB', sel: true, inactive: true },
       { ic: 'pdf', name: 'lease-2026.pdf',        date: 'Mar 11',      size: '1.8 MB' },
@@ -971,14 +1209,14 @@ function appScreenshot({ paneCount = 4, showPreview = false, focusedPane = 0 } =
     return `
       <div class="app-pane ${focused ? 'focused' : ''}">
         <div class="app-tabs">
-          <div class="app-tab active"><div class="ic"></div>${p.tab}</div>
+          <div class="app-tab active"><div class="ic">${folderIcon()}</div>${p.tab}</div>
         </div>
         <div class="app-header"><b>${p.folder}</b> — ${p.items.length} items</div>
         <div class="app-cols"><span>Name</span><span>Modified</span><span>Size</span></div>
         <div class="app-rows">
           ${p.items.map(r => `
             <div class="app-r ${r.sel ? (r.inactive ? 'sel-inactive' : 'sel') : ''}">
-              <div class="ic ${r.ic}"></div>
+              <div class="ic">${fileIcon(r.ic)}</div>
               <div class="name">${r.name}</div>
               <div class="date">${r.date}</div>
               <div class="size">${r.size}</div>
@@ -1039,14 +1277,14 @@ function appScreenshot({ paneCount = 4, showPreview = false, focusedPane = 0 } =
       <div class="app-body">
         <div class="app-sb">
           <div class="sb-section">Favorites</div>
-          <div class="sb-item"><div class="ico"></div>Desktop</div>
-          <div class="sb-item"><div class="ico"></div>Documents</div>
-          <div class="sb-item active"><div class="ico"></div>Downloads</div>
-          <div class="sb-item"><div class="ico"></div>Pictures</div>
-          <div class="sb-item"><div class="ico"></div>Projects</div>
+          <div class="sb-item"><div class="ico">${folderIcon()}</div>Desktop</div>
+          <div class="sb-item"><div class="ico">${folderIcon()}</div>Documents</div>
+          <div class="sb-item active"><div class="ico">${folderIcon()}</div>Downloads</div>
+          <div class="sb-item"><div class="ico">${folderIcon()}</div>Pictures</div>
+          <div class="sb-item"><div class="ico">${folderIcon()}</div>Projects</div>
           <div class="sb-section" style="margin-top:8px;">Locations</div>
-          <div class="sb-item"><div class="ico" style="background:#8e8e93"></div>Macintosh HD</div>
-          <div class="sb-item"><div class="ico" style="background:#8e8e93"></div>USB Drive</div>
+          <div class="sb-item"><div class="ico">${driveIcon()}</div>Macintosh HD</div>
+          <div class="sb-item"><div class="ico">${driveIcon()}</div>USB Drive</div>
           <div class="sb-section" style="margin-top:8px;">Tags</div>
           <div class="sb-item"><div class="tag-dot" style="background:#ff453a"></div>Red</div>
           <div class="sb-item"><div class="tag-dot" style="background:#ff9f0a"></div>Orange</div>
@@ -1068,6 +1306,7 @@ function appScreenshot({ paneCount = 4, showPreview = false, focusedPane = 0 } =
 
 // Render hero screenshot
 document.getElementById('hero-shot').innerHTML = appScreenshot({ paneCount: 4, focusedPane: 0 });
+document.getElementById('shift-shot').innerHTML = appScreenshot({ paneCount: 4, focusedPane: 0 });
 
 // Demo scrolly: render initial state, swap on click
 const demoStates = [

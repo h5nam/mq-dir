@@ -18,6 +18,20 @@ final class FolderBrowserViewModel: ObservableObject {
             reload()
         }
     }
+    /// Per-pane recursive search over `folderURL`. Case-insensitive substring
+    /// match on entry name. Empties on folder navigation. Each keystroke
+    /// schedules a debounced background walk that populates `searchResults`.
+    /// Not persisted — transient view state.
+    @Published var searchQuery: String = "" {
+        didSet { scheduleSearch() }
+    }
+    /// Recursive matches for the active `searchQuery`. Empty when not
+    /// filtering, or while the first results of a fresh query are still
+    /// being gathered.
+    @Published private(set) var searchResults: [FileEntry] = []
+    /// True between a non-empty `searchQuery` arriving and the resulting
+    /// recursive walk completing. Drives the spinner / "Searching…" hint.
+    @Published private(set) var isSearching: Bool = false
     @Published private(set) var sortKey: FileEntrySortKey = .name
     @Published private(set) var sortAscending = true
     @Published var columnWidths = PaneColumnWidths()
@@ -47,6 +61,11 @@ final class FolderBrowserViewModel: ObservableObject {
     var canGoForward: Bool { !forwardStack.isEmpty }
 
     private var loadTask: Task<Void, Never>?
+    private var searchTask: Task<Void, Never>?
+    /// Token handed to the in-flight enumerator so we can stop it early when
+    /// a newer query supersedes it. Detached tasks don't inherit cancellation,
+    /// so we propagate via a Sendable flag instead of relying on Task.isCancelled.
+    private var searchCancelToken: SearchCancelToken?
 
     /// Default initializer — fresh, empty pane (used by previews and the
     /// first launch when no persisted state exists).
@@ -102,6 +121,18 @@ final class FolderBrowserViewModel: ObservableObject {
         }
 
         return entries.first { $0.id == selectedID }
+    }
+
+    /// What the file list should render. Recursive `searchResults` while a
+    /// query is active, the canonical `entries` for the current folder
+    /// otherwise. Selection IDs always resolve against `entries` (so a
+    /// recursive hit clicked into a subfolder navigates fresh).
+    var visibleEntries: [FileEntry] {
+        isFiltering ? searchResults : entries
+    }
+
+    var isFiltering: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var folderDisplayPath: String {
@@ -170,9 +201,59 @@ final class FolderBrowserViewModel: ObservableObject {
         }
         folderURL = url
         selection.removeAll()
+        // Drop the per-folder filter so a query typed in the previous folder
+        // doesn't bleed into the new listing (matches Finder).
+        searchQuery = ""
         // User-driven navigation supersedes any pending restored selection.
         pendingRestoredSelection = []
         reload()
+    }
+
+    /// Debounced trigger fired by the `searchQuery` setter. Cancels any
+    /// in-flight enumeration, then (after a short quiet window) walks the
+    /// current folder recursively, collecting entries whose name matches
+    /// the query case-insensitively. Empty queries reset the result set
+    /// and never schedule a walk.
+    private func scheduleSearch() {
+        searchTask?.cancel()
+        searchCancelToken?.cancel()
+
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let root = folderURL else {
+            searchResults = []
+            isSearching = false
+            return
+        }
+
+        let token = SearchCancelToken()
+        searchCancelToken = token
+        isSearching = true
+
+        let includeHidden = includeHidden
+
+        searchTask = Task { [weak self] in
+            // Coalesce keystrokes — only the final pause kicks the walk.
+            try? await Task.sleep(for: .milliseconds(220))
+            if Task.isCancelled || token.isCancelled { return }
+
+            let results = await Task.detached(priority: .userInitiated) {
+                (try? FileSystemService().enumerateMatching(
+                    root: root,
+                    query: trimmed,
+                    includingHidden: includeHidden,
+                    isCancelled: { token.isCancelled }
+                )) ?? []
+            }.value
+
+            if Task.isCancelled || token.isCancelled { return }
+            guard let self else { return }
+            self.searchResults = FileEntrySorter.sorted(
+                results,
+                by: self.sortKey,
+                ascending: self.sortAscending
+            )
+            self.isSearching = false
+        }
     }
 
     func reload() {
@@ -372,3 +453,20 @@ final class FolderBrowserViewModel: ObservableObject {
     }
 }
 
+/// Thread-safe one-shot cancel flag handed across actor boundaries to the
+/// detached enumerator. Detached tasks don't inherit Swift's structured
+/// cancellation, so we propagate intent through this Sendable token instead.
+final class SearchCancelToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _cancelled = false
+
+    func cancel() {
+        lock.lock(); defer { lock.unlock() }
+        _cancelled = true
+    }
+
+    var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _cancelled
+    }
+}

@@ -10,6 +10,7 @@ struct MainWindowView: View {
     @State private var layout: PaneLayout
     @State private var focusedPaneIndex: Int
     @State private var sidebarSelection: URL?
+    @FocusState private var searchFocused: Bool
 
     /// Coalesces rapid state mutations into one save. Cancelled and
     /// restarted whenever a watched value changes; on natural completion
@@ -98,6 +99,9 @@ struct MainWindowView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .mqdirGoForwardRequested)) { _ in
             focusedPane.goForward()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mqdirFocusSearchRequested)) { _ in
+            searchFocused = true
         }
         // After a drag/drop move or copy, reload every pane so all four views
         // stay in sync without each pane having its own FSEvents subscription
@@ -248,22 +252,54 @@ struct MainWindowView: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 5) {
+        // Bind directly to the focused pane's query so the field reflects
+        // (and edits) the per-pane filter state. Switching focus repoints
+        // the binding to the newly-focused pane's value.
+        let queryBinding = Binding<String>(
+            get: { focusedPane.searchQuery },
+            set: { focusedPane.searchQuery = $0 }
+        )
+        let isEmpty = focusedPane.searchQuery.isEmpty
+
+        return HStack(spacing: 5) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.Color.labelTertiary)
-            Text("Search")
+            TextField("Search", text: queryBinding)
+                .textFieldStyle(.plain)
                 .font(Theme.Font.breadcrumb)
-                .foregroundStyle(Theme.Color.labelTertiary)
+                .foregroundStyle(Theme.Color.label)
+                .frame(maxWidth: .infinity)
+                .focused($searchFocused)
+                .onKeyPress(.escape) {
+                    if !focusedPane.searchQuery.isEmpty {
+                        focusedPane.searchQuery = ""
+                    } else {
+                        searchFocused = false
+                    }
+                    return .handled
+                }
+            if !isEmpty {
+                Button {
+                    focusedPane.searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.Color.labelTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear")
+            }
         }
         .padding(.horizontal, 8)
-        .frame(width: 120, height: 22)
+        .frame(width: 160, height: 22)
         .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 5))
         .overlay(
             RoundedRectangle(cornerRadius: 5)
-                .strokeBorder(Theme.Color.separator, lineWidth: 0.5)
+                .strokeBorder(searchFocused ? Theme.Color.accent : Theme.Color.separator,
+                              lineWidth: searchFocused ? 1 : 0.5)
         )
-        .help("Search (M6)")
+        .help("Search this folder (⌘F)")
     }
 
     private var layoutSegmentedControl: some View {
@@ -350,7 +386,8 @@ struct MainWindowView: View {
     // MARK: Global status bar
 
     private var globalStatusBar: some View {
-        let entryCount = focusedPane.entries.count
+        let totalCount = focusedPane.entries.count
+        let visibleCount = focusedPane.visibleEntries.count
         let selectedCount = focusedPane.selection.count
         let selectedSize = focusedPane.entries
             .filter { focusedPane.selection.contains($0.id) }
@@ -364,8 +401,16 @@ struct MainWindowView: View {
                 Text("·").foregroundStyle(Theme.Color.labelTertiary)
                 Text(ByteCountFormatter.string(fromByteCount: selectedSize, countStyle: .file))
                     .foregroundStyle(Theme.Color.labelSecondary)
-            } else if entryCount > 0 {
-                Text("\(entryCount) item\(entryCount == 1 ? "" : "s")")
+            } else if focusedPane.isFiltering {
+                if focusedPane.isSearching {
+                    Text("Searching\u{2026}")
+                        .foregroundStyle(Theme.Color.labelSecondary)
+                } else {
+                    Text("\(visibleCount) match\(visibleCount == 1 ? "" : "es")")
+                        .foregroundStyle(Theme.Color.labelSecondary)
+                }
+            } else if totalCount > 0 {
+                Text("\(totalCount) item\(totalCount == 1 ? "" : "s")")
                     .foregroundStyle(Theme.Color.labelSecondary)
             }
 
