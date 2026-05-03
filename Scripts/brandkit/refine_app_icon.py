@@ -70,21 +70,16 @@ def squircle_mask(canvas: int, radius: int) -> Image.Image:
     return m
 
 
-# Pixels darker than DARK_LUMA become fully transparent. Pixels between
-# DARK_LUMA and OPAQUE_LUMA fade linearly. This dissolves the dark glass rim
-# the AI baked into the squircle outline so it doesn't read as a hard frame
-# in the Dock; brighter glass interior pixels stay fully opaque.
-DARK_LUMA = 12
-OPAQUE_LUMA = 38
+# Sharp luma cutoff: pixels darker than CUTOFF_LUMA become fully transparent,
+# everything brighter stays fully opaque. A graduated fade leaves a translucent
+# grey rim that reads as a frame against the Dock backdrop; a binary cutoff
+# gives a clean squircle silhouette while preserving interior glass shading.
+CUTOFF_LUMA = 30
 
 
 def luminance_alpha(im: Image.Image) -> Image.Image:
     gray = im.convert("L")
-    return gray.point(
-        lambda v: 0 if v < DARK_LUMA
-        else 255 if v >= OPAQUE_LUMA
-        else int((v - DARK_LUMA) * 255 / (OPAQUE_LUMA - DARK_LUMA))
-    )
+    return gray.point(lambda v: 255 if v >= CUTOFF_LUMA else 0)
 
 
 def main() -> int:
@@ -112,7 +107,7 @@ def main() -> int:
         f"refined: {SRC.name} "
         f"(crop {bbox} → {cropped.size[0]}px square → {CANVAS}x{CANVAS}, "
         f"squircle radius {CORNER_RADIUS}px, "
-        f"luma fade {DARK_LUMA}→{OPAQUE_LUMA})"
+        f"luma cutoff {CUTOFF_LUMA})"
     )
     print("next: python3 Brandkit/postprocess.py")
     return 0

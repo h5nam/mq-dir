@@ -9,6 +9,17 @@ versioning once public releases begin.
 
 (none)
 
+## [0.1.0-alpha.6] - 2026-05-03
+
+### Fixed
+
+- Icon Dock framing, again: alpha.5's graduated luma fade left a
+  translucent grey rim around the squircle that read as a frame against
+  the Dock backdrop. Replaced the fade with a sharp luma cutoff at value
+  30 — pixels darker than 30 become fully transparent, brighter pixels
+  stay fully opaque. Result is a clean squircle silhouette with no grey
+  halo while interior glass shading and the four-cell layout stay intact.
+
 ## [0.1.0-alpha.5] - 2026-05-02
 
 ### Changed
