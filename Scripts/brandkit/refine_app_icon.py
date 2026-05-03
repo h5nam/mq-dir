@@ -34,6 +34,13 @@ CORNER_RADIUS = int(CANVAS * 0.2237)
 MARGIN_FRAC = 0.01
 # Pixels whose max RGB channel is at or below this are treated as background.
 BG_THRESHOLD = 30
+# How far to inset the squircle silhouette from the canvas edge. The
+# AI-baked design has a ~80px-wide dark glass body around its perimeter
+# that the luma cutoff cannot remove (those pixels are above CUTOFF_LUMA
+# but still dark grey). Insetting the mask trims that ring away, leaving
+# a tighter silhouette at the cost of ~6% design footprint — closer to
+# Apple's standard ~10% icon padding anyway.
+INSET = 0
 
 
 def detect_design_bbox(im: Image.Image) -> tuple[int, int, int, int]:
@@ -62,10 +69,12 @@ def square_crop_with_margin(im: Image.Image, bbox: tuple[int, int, int, int]) ->
     return im.crop((cl, ct, cl + side, ct + side))
 
 
-def squircle_mask(canvas: int, radius: int) -> Image.Image:
+def squircle_mask(canvas: int, radius: int, inset: int = 0) -> Image.Image:
     m = Image.new("L", (canvas, canvas), 0)
     ImageDraw.Draw(m).rounded_rectangle(
-        (0, 0, canvas - 1, canvas - 1), radius=radius, fill=255
+        (inset, inset, canvas - 1 - inset, canvas - 1 - inset),
+        radius=radius,
+        fill=255,
     )
     return m
 
@@ -97,16 +106,17 @@ def main() -> int:
     # Combine luma-based alpha with the squircle outline. Darker(a, b) keeps
     # the more transparent value at every pixel: dark rim fades out, plus
     # the squircle still trims the corners cleanly.
+    inset_radius = max(1, CORNER_RADIUS - INSET)
     final_alpha = ImageChops.darker(
         luminance_alpha(fitted),
-        squircle_mask(CANVAS, CORNER_RADIUS),
+        squircle_mask(CANVAS, inset_radius, inset=INSET),
     )
     fitted.putalpha(final_alpha)
     fitted.save(SRC, format="PNG")
     print(
         f"refined: {SRC.name} "
         f"(crop {bbox} → {cropped.size[0]}px square → {CANVAS}x{CANVAS}, "
-        f"squircle radius {CORNER_RADIUS}px, "
+        f"squircle inset {INSET}px / radius {inset_radius}px, "
         f"luma cutoff {CUTOFF_LUMA})"
     )
     print("next: python3 Brandkit/postprocess.py")

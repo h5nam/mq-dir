@@ -9,6 +9,18 @@ versioning once public releases begin.
 
 (none)
 
+## [0.1.0-alpha.7] - 2026-05-03
+
+### Changed
+
+- App icon master replaced with a hand-finished version that already
+  has clean transparent corners and no dark glass perimeter, so the
+  Dock no longer renders a grey ring around the squircle. The 10 sized
+  variants under `Resources/Assets.xcassets/AppIcon.appiconset/` are
+  regenerated from the new master via `Scripts/brandkit/postprocess.py`;
+  the AI/refine pipeline is bypassed for this drop because the source
+  no longer needs cropping or alpha cleanup.
+
 ## [0.1.0-alpha.6] - 2026-05-03
 
 ### Fixed

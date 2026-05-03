@@ -196,13 +196,22 @@ def _build_assets() -> list[Asset]:
                     "— A brand mark inside the squircle (form at the designer's "
                     "discretion — see LOGO TREATMENT above; legibility at 16x16 is "
                     "non-negotiable).\n"
-                    "— The brand palette showing through the glass: dark surfaces "
-                    "with the macOS system blue accent."
+                    "— The brand palette showing through the glass: bright, "
+                    "luminous frosted glass interior with the macOS system blue "
+                    "accent. Think Apple's own Settings, Finder, or Music app icon "
+                    "— bright glass body, never a dark vignette."
                 ),
                 extras=(
                     "ABSOLUTELY NO\n"
-                    "No wordmark text or labels — this is the icon glyph only. "
-                    "No drop shadows under the squircle — the OS adds those."
+                    "No wordmark text or labels — this is the icon glyph only.\n"
+                    "No drop shadows under the squircle — the OS adds those.\n"
+                    "No dark frosted edge or vignette around the squircle's perimeter "
+                    "— the squircle interior must read as uniformly bright luminous "
+                    "glass from edge to edge, with only the brightness gradient "
+                    "Apple's icon-grid template uses (subtle top-light highlight).\n"
+                    "The canvas BACKGROUND outside the squircle MUST be pure black "
+                    "(#000000) with absolutely no glow, halo, ambient light, or "
+                    "gradient bleed — a hard binary edge between squircle and void."
                 ),
             ),
         ),
