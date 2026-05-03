@@ -9,6 +9,18 @@ versioning once public releases begin.
 
 (none)
 
+## [0.1.0-alpha.8] - 2026-05-03
+
+### Fixed
+
+- App icon now sits inside proper Apple HIG-style padding (~5% on each
+  side, design at 90% of canvas) instead of touching the canvas edge.
+  In alpha.7 the squircle filled the canvas with the design's bright
+  glass rim sitting at y=0/x=0, which the macOS Dock rendered as a
+  bright "frame" around the icon. The new master is the same hand-
+  finished source resampled to 921×921 and centered on a 1024×1024
+  transparent canvas, matching the typical icon-grid template.
+
 ## [0.1.0-alpha.7] - 2026-05-03
 
 ### Changed
