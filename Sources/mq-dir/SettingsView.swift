@@ -49,7 +49,7 @@ struct SettingsView: View {
             } header: {
                 Text("Filenames")
             } footer: {
-                Text("Korean filenames stored in decomposed (NFD) form look broken — like \u{315E}\u{3157}\u{3134}\u{3131}\u{3161}\u{3139} instead of 한글 — when dragged or copied into other apps. Turn this on to rename them to composed (NFC) form on disk as they leave mq-dir.")
+                Text("Korean filenames stored in decomposed (NFD) form look broken — like \u{315E}\u{3157}\u{3134}\u{3131}\u{3161}\u{3139} instead of 한글 — in terminals, Git, zip archives, and Windows transfers. Turn this on to rename them to composed (NFC) form on disk as they drag out of mq-dir. This fixes the name on disk; apps that rebuild names from the drag URL (such as web browsers) may still display NFD.")
                     .foregroundStyle(.secondary)
             }
 

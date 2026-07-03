@@ -8,7 +8,7 @@ cask "mq-dir" do
   homepage "https://github.com/h5nam/mq-dir"
 
   auto_updates false
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "mq-dir.app"
 
