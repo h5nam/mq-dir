@@ -112,3 +112,29 @@ extension Notification.Name {
     /// so the active window can flush a synchronous save before exit.
     static let mqdirAppWillTerminate = Notification.Name("mqdir.appWillTerminate")
 }
+
+/// Scoped change notifications; legacy senders without folders still refresh all.
+enum FileSystemChange {
+    static func post(folders: [URL]) {
+        NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil,
+            userInfo: ["folders": Array(Set(folders))])
+    }
+
+    static func folders(in notification: Notification) -> [URL]? {
+        notification.userInfo?["folders"] as? [URL]
+    }
+}
+
+@MainActor
+enum ExternalFolderRequests {
+    private static var pending: [URL] = []
+    static let changed = Notification.Name("mqdir.externalFolderRequests")
+    static func enqueue(_ urls: [URL]) {
+        pending.append(contentsOf: urls.filter(\.isFileURL))
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+    static func consume() -> [URL] {
+        defer { pending.removeAll() }
+        return pending
+    }
+}

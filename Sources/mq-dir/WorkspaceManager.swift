@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// App-level owner of the persisted workspace: the project list, which
@@ -11,20 +12,25 @@ import Foundation
 @MainActor
 final class WorkspaceManager: ObservableObject {
     @Published private(set) var workspace: WorkspaceState
+    @Published var recoveryMessage: String?
 
-    private let persistence: PersistenceService?
+    private let stateWriter: StateWriter?
     private var saveDebounceTask: Task<Void, Never>?
 
-    init() {
-        // Best-effort persistence — a sandbox/CI env without home-dir
-        // write access still gets a working in-memory workspace.
-        let service = try? PersistenceService()
-        self.persistence = service
+    convenience init() {
+        self.init(persistence: try? PersistenceService())
+    }
+
+    /// An explicit state and persistence URL keep service tests off user data.
+    init(persistence service: PersistenceService?, initialState: WorkspaceState? = nil) {
+        self.stateWriter = service.map { persistence in StateWriter { try persistence.saveState($0) } }
 
         // Load → migrate → seed favorites if needed. WorkspaceState's
         // decoder handles legacy state.json shapes; the seeding pass
         // below populates the six home subdirs the very first time.
-        var loaded = service?.loadState() ?? .empty
+        var recoveryMessage: String?
+        var loaded = initialState ?? service?.loadState(onRecovery: { recoveryMessage = $0 }) ?? .empty
+        self.recoveryMessage = recoveryMessage
         if !loaded.favoritesSeeded {
             loaded.favorites = SidebarViewModel.defaultSeed()
             loaded.favoritesSeeded = true
@@ -39,11 +45,10 @@ final class WorkspaceManager: ObservableObject {
             ?? workspace.projects[0]
     }
 
-    /// Capture the running pane state into the active project before
-    /// switching. Called by `MainWindowView` right before `.id` flips
-    /// and tears down its `@StateObject` panes.
-    func updateActive(_ body: (inout Project) -> Void) {
-        guard let idx = workspace.projects.firstIndex(where: { $0.id == workspace.activeProjectID })
+    /// A delayed snapshot always belongs to its original project, even if
+    /// another project has become active before the callback is delivered.
+    func updateProject(id: UUID, _ body: (inout Project) -> Void) {
+        guard let idx = workspace.projects.firstIndex(where: { $0.id == id })
         else { return }
         mutate { state in
             var project = state.projects[idx]
@@ -69,6 +74,19 @@ final class WorkspaceManager: ObservableObject {
         mutate { state in
             state.projects.append(project)
             state.activeProjectID = project.id
+        }
+    }
+
+    func duplicateProject(_ id: UUID) {
+        guard let original = workspace.projects.first(where: { $0.id == id }) else { return }
+        let names = Set(workspace.projects.map(\.name))
+        var name = original.name + " Copy"
+        var suffix = 2
+        while names.contains(name) { name = original.name + " Copy \(suffix)"; suffix += 1 }
+        let duplicate = Project(name: name, state: original.state)
+        mutate {
+            $0.projects.append(duplicate)
+            $0.activeProjectID = duplicate.id
         }
     }
 
@@ -175,6 +193,19 @@ final class WorkspaceManager: ObservableObject {
         mutate { $0.settings.shortcutOverrides.removeAll() }
     }
 
+    func setIntegrationProvider(_ provider: WorkspaceProvider) {
+        guard workspace.settings.integrationProvider != provider else { return }
+        mutate { $0.settings.integrationProvider = provider }
+    }
+
+    func saveSearch(_ search: SavedFileSearch) {
+        mutate { $0.settings.savedSearches.append(search) }
+    }
+
+    func removeSearch(_ id: UUID) {
+        mutate { $0.settings.savedSearches.removeAll { $0.id == id } }
+    }
+
     // MARK: Persistence
 
     /// Single mutation entry point: apply `body` to the live workspace and
@@ -187,40 +218,22 @@ final class WorkspaceManager: ObservableObject {
     }
 
     private func scheduleSave() {
-        guard let persistence else { return }
+        guard let stateWriter else { return }
         saveDebounceTask?.cancel()
-        // Capture only `persistence` by value; read `self.workspace` fresh
-        // inside the @MainActor body after the sleep so the persisted snapshot
-        // reflects any mutation that landed during the 500ms debounce window
-        // rather than the by-value snapshot taken at schedule time.
-        saveDebounceTask = Task { @MainActor [persistence] in
-            try? await Task.sleep(for: .milliseconds(500))
-            if Task.isCancelled { return }
-            await Self.persist(self.workspace, using: persistence)
+        saveDebounceTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(500)) }
+            catch { return }
+            guard !Task.isCancelled, let self else { return }
+            // Enqueue synchronously on the main actor, preserving mutation order.
+            stateWriter.enqueue(self.workspace)
         }
     }
 
-    /// Synchronous flush, used on app termination where the runloop
-    /// teardown would cancel any pending debounced task.
+    /// Drain older writes before committing the final snapshot on termination.
     func saveSynchronously() {
-        guard let persistence else { return }
         saveDebounceTask?.cancel()
-        try? persistence.saveState(workspace)
-    }
-
-    nonisolated private static func persist(
-        _ state: WorkspaceState,
-        using persistence: PersistenceService
-    ) async {
-        await Task.detached(priority: .utility) {
-            do {
-                try persistence.saveState(state)
-            } catch {
-                FileHandle.standardError.write(
-                    Data("[mq-dir persist] save failed: \(error.localizedDescription)\n".utf8)
-                )
-            }
-        }.value
+        do { try stateWriter?.flush(workspace) }
+        catch { StateWriter.log(error) }
     }
 
     // MARK: Helpers

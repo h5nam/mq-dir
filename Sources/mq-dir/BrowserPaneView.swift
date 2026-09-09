@@ -209,7 +209,7 @@ struct BrowserPaneView: View {
 
         Button("Open in Terminal") { viewModel.openCurrentFolderInTerminal() }
             .disabled(viewModel.folderURL == nil)
-        if viewModel.canOpenInCmux {
+        if workspace.workspace.settings.integrationProvider == .cmux, viewModel.canOpenInCmux {
             Button("Open in cmux") { viewModel.openCurrentFolderInCmux() }
                 .disabled(viewModel.folderURL == nil)
         }
@@ -846,6 +846,7 @@ struct BrowserPaneView: View {
                                     .id(entry.id)
                             }
                         }
+                        .scrollTargetLayout()
                         .padding(.vertical, 2)
 
                         // Fill any empty space below the last row.
@@ -865,6 +866,11 @@ struct BrowserPaneView: View {
                     }
                     .frame(minHeight: geo.size.height, alignment: .top)
                 }
+                .scrollPosition(id: Binding(get: { viewModel.listScrollID }, set: { value in
+                    if !viewModel.isLoading && !viewModel.isFiltering && viewModel.listScrollID != value {
+                        viewModel.listScrollID = value
+                    }
+                }), anchor: .top)
             .focusable()
             .focused($listFocused)
             .onAppear {

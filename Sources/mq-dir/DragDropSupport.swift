@@ -10,8 +10,9 @@ import UniformTypeIdentifiers
 // so that pane-to-pane drops can move every selected item even though
 // SwiftUI's `.draggable` only ships one item at a time.
 
+@MainActor
 enum DragDropSupport {
-    static let mqdirSelectionTypeIdentifier = "com.mqdir.selection.urls"
+    nonisolated static let mqdirSelectionTypeIdentifier = "com.mqdir.selection.urls"
 
     // Drag-source construction lives in `AppKitFileDrag.swift` — we drive
     // NSDraggingSession directly with an NSPasteboardItem because
@@ -63,7 +64,7 @@ enum DragDropSupport {
     }
 
     /// Type identifiers a drop destination should accept.
-    static let acceptedDropTypes: [String] = [
+    nonisolated static let acceptedDropTypes: [String] = [
         mqdirSelectionTypeIdentifier,
         UTType.fileURL.identifier,
     ]

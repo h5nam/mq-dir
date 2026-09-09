@@ -147,10 +147,11 @@ struct SettingsView: View {
     private func conflictingAction(
         for candidate: ShortcutBinding,
         ignoring: ShortcutAction
-    ) -> ShortcutAction? {
+    ) -> String? {
+        if let reserved = ShortcutConflicts.reservedName(for: candidate) { return reserved }
         for action in ShortcutAction.allCases where action != ignoring {
             if workspace.workspace.settings.binding(for: action) == candidate {
-                return action
+                return action.label
             }
         }
         return nil
@@ -169,11 +170,11 @@ extension ShortcutAction: Identifiable {
 /// captures reliably on macOS 14.
 struct KeyCaptureSheet: View {
     let action: ShortcutAction
-    let conflictChecker: (ShortcutBinding) -> ShortcutAction?
+    let conflictChecker: (ShortcutBinding) -> String?
     let onCommit: (ShortcutBinding) -> Void
 
     @State private var captured: ShortcutBinding?
-    @State private var conflictWith: ShortcutAction?
+    @State private var conflictWith: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -194,7 +195,7 @@ struct KeyCaptureSheet: View {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                    Text("Already used by \u{201C}\(conflictWith.label)\u{201D}")
+                    Text("Already used by \u{201C}\(conflictWith)\u{201D}")
                         .foregroundStyle(.primary)
                 }
                 .font(.system(size: 11))
@@ -252,7 +253,7 @@ private struct KeyCaptureView: NSViewRepresentable {
                 self.captured = binding
             }
         }
-        view.onBareEscape = { DispatchQueue.main.async(execute: onBareEscape) }
+        view.onBareEscape = onBareEscape
         return view
     }
 

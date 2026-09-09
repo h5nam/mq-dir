@@ -39,7 +39,7 @@ fi
 # 4. Generate Xcode project from project.yml
 step "Generating mq-dir.xcodeproj from project.yml"
 cd "$(dirname "$0")/.."
-xcodegen generate
+Scripts/generate-project.sh
 
 step "Done."
 cat <<'EOM'

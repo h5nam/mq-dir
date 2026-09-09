@@ -33,11 +33,7 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 - 🔎 **Per-pane recursive search** — debounced, case-insensitive substring match across the current folder's subtree. ⌘F.
 - 🔄 **In-app auto-update** — Sparkle 2 polls the appcast every 24 h; when a new release is out, the sidebar grows an "Update Available" button that runs the standard install/relaunch flow.
 - 💬 **In-app Send Feedback** — sidebar footer → send a short note with optional screenshots straight to the maintainer (no email client involved).
-- 🔗 **[cmux](https://cmux.com) sync** — sidebar grows a CMUX section that mirrors your cmux workspaces. Click a row to open its working directory in the focused pane (⌘-click for a new tab). cmux ships with the socket locked to its own children, so pick one of:
-  - **Quick:** cmux → Settings → Automation → Socket Control Mode = Allow All.
-  - **Stricter:** Socket Control Mode = Password, then `launchctl setenv CMUX_SOCKET_PASSWORD <pw>` (so the env var reaches GUI-launched apps) and relaunch mq-dir.
-
-  Section stays hidden when cmux isn't installed.
+- 🔗 **Selectable coding app integrations** — choose cmux, Orca, Paseo, Claude Code Desktop, or Codex Desktop in the sidebar, then Sync to list local workspace folders. Click to open a folder; ⌘-click opens a new tab. The selection survives relaunch. See [setup and support boundaries](docs/integrations.md).
 - 🎨 **Native macOS look** — SwiftUI + AppKit, system theme tokens, hand-finished app icon.
 
 **Roadmap**
@@ -89,12 +85,15 @@ swift test
 
 ## Privacy
 
+External images in Markdown previews are blocked by default. Choosing **Load external images** sends requests to the image servers for that document. Opening another document resets this permission. Local images display without image-server requests.
+
 **We never call home. No telemetry, no crash reporting, no analytics. Ever, in v1.**
 
-mq-dir is local-only by default. Outbound network traffic is limited to two narrowly-scoped paths, both auditable in the source:
+mq-dir is local-only by default. Outbound network traffic is limited to the following paths, each auditable in the source:
 
-1. **Sparkle update check** — once every 24 hours, fetches `https://h5nam.github.io/mq-dir/appcast.xml`. Public file, no identifying info attached to the request.
-2. **Send Feedback** — only when *you* press the button in the sidebar footer, posts your message + optional screenshots to the maintainer's Discord webhook. Nothing leaves the machine if you never use it.
+1. **Markdown external images** — only after choosing to load external images for the previewed document.
+2. **Sparkle update check** — once every 24 hours, fetches `https://h5nam.github.io/mq-dir/appcast.xml`. Public file, no identifying info attached to the request.
+3. **Send Feedback** — only when *you* press the button in the sidebar footer, posts your message + optional screenshots to the maintainer's Discord webhook. Nothing leaves the machine if you never use it.
 
 No background analytics, no usage pings, no crash reporting upload. Local state lives in `~/Library/Application Support/com.mqdir.app/`.
 
@@ -111,31 +110,13 @@ PRs welcome. Contributions are accepted via [DCO](https://developercertificate.o
 ## Releasing (maintainers only)
 
 ```bash
-Scripts/release.sh 0.1.3
+Scripts/release.sh --dry-run 0.3.0
+Scripts/release.sh 0.3.0
 ```
 
-That's it. The script bumps the version, builds Release with Developer ID, re-signs every nested binary inside-out (Sparkle's helpers don't auto-inherit signing), notarizes via the stored `mq-dir-notary` keychain profile + staples, builds and EdDSA-signs the DMG, appends a fresh `<item>` to `docs/appcast.xml`, bumps `Casks/mq-dir.rb`, tags + pushes, and creates the GitHub release.
+Run from a clean `main`. The script bumps version/build and pushes the commit and tag atomically. CI tests that exact tag and validates the bundle before signing, notarizing and publishing. Published assets are never overwritten; reruns verify the existing files and resume appcast/cask updates.
 
-**One-time setup** (per maintainer machine):
-
-```bash
-Scripts/sparkle-setup.sh
-# → downloads Sparkle binary tools, generates the EdDSA key pair in your
-#   macOS keychain, prints the public half. Already embedded in
-#   project.yml's SUPublicEDKey for this project; only needed if a
-#   future maintainer rotates the key.
-
-xcrun notarytool store-credentials mq-dir-notary \
-    --apple-id <your-apple-id> --team-id WKV6T7K33K \
-    --password <app-specific-password>
-
-brew install create-dmg
-gh auth login
-```
-
-Plus give codesign access to the Developer ID private key once: Keychain Access → login → My Certificates → expand `Developer ID Application: …` → right-click the private key → Get Info → Access Control → **Allow all applications to access this item**. Without this, every release prompts for your Mac password ~10 times during the inside-out re-sign.
-
-GitHub Pages is already enabled on `main` / `/docs` so the appcast at `https://h5nam.github.io/mq-dir/appcast.xml` updates within a minute of every push.
+See the [release guide](docs/releasing.md) for credentials, dependency locking and recovery. Generate the app project with `Scripts/generate-project.sh` to apply the tracked dependency lock.
 
 ## License
 

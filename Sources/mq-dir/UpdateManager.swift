@@ -16,6 +16,7 @@ import Sparkle
 /// dialogs already handle progress, errors, and the relaunch prompt; until
 /// the UX needs diverge from "show the system flow on click", reinventing
 /// that surface area is wasted work.
+@MainActor
 final class UpdateManager: NSObject, ObservableObject {
     @Published private(set) var updateAvailable: Bool = false
     @Published private(set) var availableVersion: String?
@@ -33,6 +34,9 @@ final class UpdateManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MQDIR_TEST_STATE_DIR"] != nil { return }
+        #endif
 
         // Mirror availability into the Dock badge so users notice updates
         // even when the sidebar isn't visible. Sparkle's stock UX has no

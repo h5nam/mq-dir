@@ -7,369 +7,283 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version without leading v, for example 0.1.0
+        description: Existing tag version without leading v, for example 0.3.0
         required: true
 
 permissions:
-  contents: write
+  contents: read
+
+# All releases share the appcast and cask, not just releases of the same tag.
+concurrency:
+  group: mq-dir-release
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Signed and notarized release
+  verify:
+    name: Verify exact release commit
     runs-on: macos-14
     env:
-      APP_NAME: mq-dir
       DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
-      DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
-      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-      # File-backup form of the Sparkle EdDSA private key, base64-encoded.
-      # Generate locally with `Scripts/sparkle-setup.sh`, then paste:
-      #   base64 ~/.config/mq-dir-release/sparkle/ed_priv | pbcopy
-      # into Repository Settings → Secrets → SPARKLE_ED_PRIVATE_KEY.
-      SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-      GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      build: ${{ steps.metadata.outputs.build }}
+      sha: ${{ steps.ref.outputs.sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          # Full history so the release-notes step can compute commit
-          # subjects between the previous tag and this one.
           fetch-depth: 0
-
-      - name: Resolve version
+      - name: Validate version and check out its existing tag
+        id: ref
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF_NAME#v}"
           fi
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "TAG=v${VERSION}" >> "$GITHUB_ENV"
-
-      - name: Check signing inputs
+          python3 Scripts/release_tools.py version --version "$VERSION" >/dev/null
+          git rev-parse --verify "refs/tags/v${VERSION}^{commit}" >/dev/null
+          git checkout --detach "refs/tags/v${VERSION}"
+          git merge-base --is-ancestor HEAD origin/main
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check source version and build number
+        id: metadata
+        run: python3 Scripts/release_tools.py source --version "$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Install XcodeGen
         run: |
-          test -n "$DEVELOPMENT_TEAM"
-          test -n "$APPLE_CERTIFICATE_BASE64"
-          test -n "$APPLE_CERTIFICATE_PASSWORD"
-          test -n "$APPLE_KEYCHAIN_PASSWORD"
-          test -n "$APPLE_API_KEY_BASE64"
-          test -n "$APPLE_API_KEY_ID"
-          test -n "$APPLE_API_ISSUER_ID"
-          test -n "$SPARKLE_ED_PRIVATE_KEY"
-
-      - name: Install build tools
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+      - name: Test release tools and core
         run: |
-          # XcodeGen for project regeneration; create-dmg for the layout-rich
-          # installer that Scripts/release.sh used to produce locally. Without
-          # create-dmg the runner would fall back to bare `hdiutil create`,
-          # which ships a DMG with no Applications symlink, no .DS_Store, no
-          # background — that's the regression that broke v0.1.0-beta.7.
-          if ! command -v xcodegen   >/dev/null 2>&1; then brew install xcodegen;   fi
+          python3 -m unittest discover -s Tests/release -v
+          swift test
+      - name: Generate locked project and test app services
+        run: |
+          Scripts/generate-project.sh
+          xcodebuild -project mq-dir.xcodeproj -scheme mq-dir \
+            -configuration Debug -destination 'platform=macOS' \
+            -derivedDataPath build/Verified \
+            -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO test
+      - name: Verify built bundle metadata
+        env:
+          BUILD_NUMBER: ${{ steps.metadata.outputs.build }}
+        run: |
+          python3 Scripts/release_tools.py bundle --version "$VERSION" --build "$BUILD_NUMBER" \
+            --plist build/Verified/Build/Products/Debug/mq-dir.app/Contents/Info.plist
+
+  release:
+    name: Publish verified release or resume metadata update
+    needs: verify
+    runs-on: macos-14
+    permissions:
+      contents: write
+    env:
+      APP_NAME: mq-dir
+      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
+      VERSION: ${{ needs.verify.outputs.version }}
+      BUILD_NUMBER: ${{ needs.verify.outputs.build }}
+      RELEASE_SHA: ${{ needs.verify.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          fetch-depth: 0
+      - name: Find an existing release without treating API failure as absence
+        run: |
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+          cp Scripts/release_tools.py "$RUNNER_TEMP/release_tools.py"
+          mkdir -p dist
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"v$VERSION\") | {draft}" > "$RUNNER_TEMP/existing-release.json"
+          if [[ -s "$RUNNER_TEMP/existing-release.json" ]]; then
+            python3 - "$RUNNER_TEMP/existing-release.json" <<'PY'
+          import json, sys
+          if json.load(open(sys.argv[1]))['draft']:
+              sys.exit('An incomplete draft already exists. Refusing to replace its assets; inspect the failed publication first.')
+          PY
+            gh release download "v$VERSION" --dir dist \
+              --pattern "$APP_NAME-v$VERSION.dmg" --pattern "$APP_NAME-v$VERSION.zip" \
+              --pattern release.json --pattern SHA256SUMS
+            python3 Scripts/release_tools.py verify --version "$VERSION" --build "$BUILD_NUMBER" --sha "$RELEASE_SHA"
+            echo "BUILD_RELEASE=false" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_RELEASE=true" >> "$GITHUB_ENV"
+          fi
+      - name: Install release tools
+        if: env.BUILD_RELEASE == 'true'
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
           if ! command -v create-dmg >/dev/null 2>&1; then brew install create-dmg; fi
-          xcodegen --version
-          create-dmg --version
-
-      - name: Install Sparkle CLI
-        run: |
-          # Sparkle's binary release ships sign-update / generate-keys, which
-          # are absent from the SwiftPM checkout. Same provisioning scheme as
-          # Scripts/sparkle-setup.sh, but unattended.
+          # Preserve the existing signing-tool version; app dependencies are locked separately.
           SPARKLE_VERSION=2.6.4
           TOOLS_DIR="$RUNNER_TEMP/sparkle"
           mkdir -p "$TOOLS_DIR"
-          curl -fL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
+          curl -fL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" \
             -o "$RUNNER_TEMP/sparkle.tar.xz"
           tar -C "$TOOLS_DIR" -xJf "$RUNNER_TEMP/sparkle.tar.xz"
-          # Sparkle 2.6.x renamed sign_update → sign-update; resolve either.
-          if   [ -x "$TOOLS_DIR/bin/sign-update" ]; then
+          if [[ -x "$TOOLS_DIR/bin/sign-update" ]]; then
             echo "SIGN_UPDATE=$TOOLS_DIR/bin/sign-update" >> "$GITHUB_ENV"
-          elif [ -x "$TOOLS_DIR/bin/sign_update" ]; then
+          elif [[ -x "$TOOLS_DIR/bin/sign_update" ]]; then
             echo "SIGN_UPDATE=$TOOLS_DIR/bin/sign_update" >> "$GITHUB_ENV"
           else
-            echo "Sparkle sign-update binary not found under $TOOLS_DIR/bin" >&2
-            ls -la "$TOOLS_DIR/bin" >&2
+            echo 'Sparkle signing tool is missing' >&2
             exit 1
           fi
-
-      - name: Import Developer ID certificate
+      - name: Import signing certificate
+        if: env.BUILD_RELEASE == 'true'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
         run: |
+          test -n "$APPLE_CERTIFICATE_BASE64"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_KEYCHAIN_PASSWORD"
           CERT_PATH="$RUNNER_TEMP/developer-id.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/release.keychain-db"
-          printf "%s" "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$CERT_PATH"
+          umask 077
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$CERT_PATH"
           security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
-
-      - name: Generate project
-        run: xcodegen generate
-
-      - name: Archive app
+      - name: Build and export signed app from the verified commit
+        if: env.BUILD_RELEASE == 'true'
+        env:
+          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
         run: |
-          xcodebuild archive \
-            -project mq-dir.xcodeproj \
-            -scheme mq-dir \
-            -configuration Release \
+          test -n "$DEVELOPMENT_TEAM"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          Scripts/generate-project.sh
+          xcodebuild archive -project mq-dir.xcodeproj -scheme mq-dir -configuration Release \
             -archivePath "$RUNNER_TEMP/mq-dir.xcarchive" \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
-            OTHER_CODE_SIGN_FLAGS="--timestamp"
-
-      - name: Export app
-        run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>developer-id</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>teamID</key>
-            <string>${DEVELOPMENT_TEAM}</string>
-            <key>stripSwiftSymbols</key>
-            <true/>
-          </dict>
-          </plist>
-          PLIST
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/mq-dir.xcarchive" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
-
+            -onlyUsePackageVersionsFromResolvedFile \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY='Developer ID Application' OTHER_CODE_SIGN_FLAGS='--timestamp'
+          python3 - "$RUNNER_TEMP/ExportOptions.plist" <<'PY'
+          import os, plistlib, sys
+          with open(sys.argv[1], 'wb') as stream:
+              plistlib.dump(dict(method='developer-id', signingStyle='manual',
+                                teamID=os.environ['DEVELOPMENT_TEAM'], stripSwiftSymbols=True), stream)
+          PY
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/mq-dir.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          python3 Scripts/release_tools.py bundle --version "$VERSION" --build "$BUILD_NUMBER" \
+            --plist "$RUNNER_TEMP/export/$APP_NAME.app/Contents/Info.plist"
       - name: Notarize and staple app
+        if: env.BUILD_RELEASE == 'true'
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
-          APP_PATH="$RUNNER_TEMP/export/${APP_NAME}.app"
-          AUTH_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-          NOTARY_ZIP="$RUNNER_TEMP/${APP_NAME}-notary.zip"
-          printf "%s" "$APPLE_API_KEY_BASE64" | base64 -D > "$AUTH_KEY_PATH"
-          chmod 600 "$AUTH_KEY_PATH"
+          test -n "$APPLE_API_KEY_BASE64"
+          test -n "$APPLE_API_KEY_ID"
+          test -n "$APPLE_API_ISSUER_ID"
+          APP_PATH="$RUNNER_TEMP/export/$APP_NAME.app"
+          AUTH_KEY_PATH="$RUNNER_TEMP/notary-auth.p8"
+          umask 077
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$AUTH_KEY_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-          ditto -c -k --keepParent "$APP_PATH" "$NOTARY_ZIP"
-          xcrun notarytool submit "$NOTARY_ZIP" \
-            --key "$AUTH_KEY_PATH" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID" \
-            --wait
+          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/notary.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notary.zip" --key "$AUTH_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --wait
           xcrun stapler staple "$APP_PATH"
-
-      - name: Package DMG with installer layout
+      - name: Package DMG and ZIP
+        if: env.BUILD_RELEASE == 'true'
         run: |
-          # Mirrors Scripts/release.sh exactly so the locally-cut DMG and the
-          # CI-cut DMG present identical Finder layouts. Volname must stay
-          # plain "${APP_NAME}" — including the version (e.g. "mq-dir 0.1.0")
-          # makes Finder open a default-sized window with no Applications
-          # symlink, which is the regression beta.7 shipped with.
-          APP_PATH="$RUNNER_TEMP/export/${APP_NAME}.app"
-          mkdir -p dist
-          DMG_PATH="dist/${APP_NAME}-v${VERSION}.dmg"
-          ZIP_PATH="dist/${APP_NAME}-v${VERSION}.zip"
-          rm -f "$DMG_PATH" "$ZIP_PATH"
-          create-dmg \
-            --volname "${APP_NAME}" \
-            --window-size 540 380 \
-            --background "Resources/installer/dmg_background.png" \
-            --icon-size 128 \
-            --icon "${APP_NAME}.app" 135 170 \
-            --app-drop-link 385 170 \
-            "$DMG_PATH" \
-            "$APP_PATH"
-          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-
-      - name: EdDSA-sign DMG with Sparkle key
+          APP_PATH="$RUNNER_TEMP/export/$APP_NAME.app"
+          create-dmg --volname "$APP_NAME" --window-size 540 380 \
+            --background Resources/installer/dmg_background.png --icon-size 128 \
+            --icon "$APP_NAME.app" 135 170 --app-drop-link 385 170 \
+            "dist/$APP_NAME-v$VERSION.dmg" "$APP_PATH"
+          ditto -c -k --keepParent "$APP_PATH" "dist/$APP_NAME-v$VERSION.zip"
+      - name: Sign DMG and record verified artifact metadata
+        if: env.BUILD_RELEASE == 'true'
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
-          # Sign the DMG bytes that will actually be uploaded so Sparkle's
-          # signature on the appcast matches what users download. Detached
-          # signing (no DMG bytes change) — output is one line of attribute
-          # text that we splice straight into the enclosure tag.
-          DMG_PATH="dist/${APP_NAME}-v${VERSION}.dmg"
+          test -n "$SPARKLE_ED_PRIVATE_KEY"
           PRIV="$RUNNER_TEMP/sparkle-priv"
-          printf "%s" "$SPARKLE_ED_PRIVATE_KEY" | base64 -D > "$PRIV"
-          chmod 600 "$PRIV"
-          SIG_LINE="$("$SIGN_UPDATE" -f "$PRIV" "$DMG_PATH")"
-          # Wipe immediately. The EdDSA seed is the keys-to-the-kingdom for
-          # publishing updates; don't leave it on disk past the sign call.
-          shred -u "$PRIV" 2>/dev/null || rm -f "$PRIV"
-          # Multi-line-safe stash via heredoc env: SIG_LINE is single-line
-          # but using the delimiter form avoids surprises if Sparkle ever
-          # adds a trailing newline.
-          {
-            echo "SIG_LINE<<__SIG_EOF__"
-            echo "$SIG_LINE"
-            echo "__SIG_EOF__"
-          } >> "$GITHUB_ENV"
-
-      - name: Generate SHA256SUMS
+          trap 'rm -f "$PRIV"' EXIT
+          umask 077
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | base64 -D > "$PRIV"
+          SIG_LINE="$("$SIGN_UPDATE" -f "$PRIV" "dist/$APP_NAME-v$VERSION.dmg")"
+          python3 Scripts/release_tools.py manifest --version "$VERSION" --build "$BUILD_NUMBER" \
+            --sha "$RELEASE_SHA" --signature "$SIG_LINE"
+      - name: Verify artifacts and reject stale release before publishing
         run: |
-          cd dist
-          shasum -a 256 ./* | grep -v SHA256SUMS > SHA256SUMS
-
-      - name: Publish GitHub release
+          python3 Scripts/release_tools.py verify --version "$VERSION" --build "$BUILD_NUMBER" --sha "$RELEASE_SHA"
+          git fetch origin main "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git rev-parse "$TAG^{commit}")" = "$RELEASE_SHA"
+          git show origin/main:docs/appcast.xml > "$RUNNER_TEMP/appcast.xml"
+          git show origin/main:Casks/mq-dir.rb > "$RUNNER_TEMP/mq-dir.rb"
+          python3 Scripts/release_tools.py metadata --repository "$GITHUB_REPOSITORY" \
+            --appcast "$RUNNER_TEMP/appcast.xml" --cask "$RUNNER_TEMP/mq-dir.rb" --check-only
+      - name: Publish new release without replacing existing assets
+        if: env.BUILD_RELEASE == 'true'
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            # Pre-existing release (manual workflow_dispatch re-run, or a
-            # tag that was previously published). Replace assets so the
-            # download URL keeps pointing at the freshly-built bytes that
-            # match the appcast EdDSA signature we're about to commit.
-            gh release upload "$TAG" dist/* --clobber
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          PREV_TAG="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+          if [[ -n "$PREV_TAG" ]]; then
+            {
+              echo "## What's Changed"
+              echo
+              git log "$PREV_TAG..$TAG" --pretty=format:'- %s' | grep -vE '^- Release v[0-9]' || true
+              echo
+              echo
+              echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$PREV_TAG...$TAG"
+            } > "$NOTES_FILE"
           else
-            PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
-            NOTES_FILE="$(mktemp)"
-            if [ -n "$PREV_TAG" ]; then
-              {
-                echo "## What's Changed"
-                echo
-                # Skip the auto-generated "Release vX.Y.Z" bump commit so it
-                # doesn't sit at the top of every release's notes as noise.
-                git log "${PREV_TAG}..${TAG}" --pretty=format:'- %s' \
-                  | grep -vE '^- Release v[0-9]' || true
-                echo
-                echo
-                echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
-              } > "$NOTES_FILE"
-            else
-              echo "Initial release." > "$NOTES_FILE"
-            fi
-            gh release create "$TAG" dist/* \
-              --title "${APP_NAME} ${TAG}" \
-              --notes-file "$NOTES_FILE"
-            rm -f "$NOTES_FILE"
+            echo 'Initial release.' > "$NOTES_FILE"
           fi
-
-      - name: Update appcast and cask, push to main
+          FLAGS=()
+          if [[ "$VERSION" == *-* ]]; then FLAGS+=(--prerelease); fi
+          gh release create "$TAG" --verify-tag --draft --title "$APP_NAME $TAG" \
+            --notes-file "$NOTES_FILE" "${FLAGS[@]}"
+          gh release upload "$TAG" dist/*
+          gh release edit "$TAG" --draft=false
+      - name: Update appcast and cask from published bytes
         run: |
-          # Splice + commit happens AFTER the release upload so a publish
-          # failure doesn't leave appcast pointing at a release that
-          # doesn't exist yet. If this step fails, the published artifacts
-          # are still fine — re-run the workflow or hand-edit appcast.
-          DMG_NAME="${APP_NAME}-v${VERSION}.dmg"
-          DMG_PATH="dist/${DMG_NAME}"
-          DMG_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${DMG_NAME}"
-          PUBDATE="$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")"
-          DMG_SHA="$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)"
-
-          # Read the monotonic build number `Scripts/release.sh` wrote
-          # into project.yml. The appcast emits this as `<sparkle:version>`
-          # so SUStandardVersionComparator picks the latest item by
-          # comparing integers against the host's CFBundleVersion. Pre-
-          # beta.12 builds shipped with CFBundleVersion="1", which made
-          # the comparator decide "0.1.0-beta.N" < "1" and silently
-          # report "up to date" — feeding the integer instead fixes
-          # those installs retroactively the next time they check.
-          BUILD_NUMBER="$(grep -E 'CFBundleVersion: "[0-9]+"' project.yml | sed -E 's/.*CFBundleVersion: "([0-9]+)".*/\1/')"
-          if [ -z "${BUILD_NUMBER}" ]; then
-            echo "Could not read CFBundleVersion from project.yml" >&2
-            exit 1
-          fi
-
-          # Switch onto a fresh copy of main BEFORE editing — the tag we
-          # built from is detached, and main may have moved while CI ran.
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin main
           git checkout -B post-release origin/main
-
-          # Splice <item> immediately below the APPCAST-PREPEND-MARKER anchor
-          # so the newest release is the first <item> Sparkle parses. Sparkle
-          # 2 falls back to RSS order when its version comparator can't rank
-          # prerelease (alpha/beta) semver tags, so appending at </channel>
-          # silently makes the oldest release look like "newest available".
-          TMP_APPCAST="$(mktemp)"
-          APPCAST_VER="${VERSION}" \
-          APPCAST_BUILD="${BUILD_NUMBER}" \
-          APPCAST_URL="${DMG_URL}" \
-          APPCAST_SIG="${SIG_LINE}" \
-          APPCAST_PUB="${PUBDATE}" \
-          awk '
-          BEGIN {
-              ver = ENVIRON["APPCAST_VER"]
-              build = ENVIRON["APPCAST_BUILD"]
-              url = ENVIRON["APPCAST_URL"]
-              sig = ENVIRON["APPCAST_SIG"]
-              pub = ENVIRON["APPCAST_PUB"]
-          }
-          /APPCAST-PREPEND-MARKER/ {
-              print
-              print "    <item>"
-              print "      <title>Version " ver "</title>"
-              print "      <pubDate>" pub "</pubDate>"
-              print "      <sparkle:version>" build "</sparkle:version>"
-              print "      <sparkle:shortVersionString>" ver "</sparkle:shortVersionString>"
-              print "      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>"
-              print "      <enclosure url=\"" url "\" " sig " type=\"application/octet-stream\" />"
-              print "    </item>"
-              next
-          }
-          { print }
-          ' docs/appcast.xml > "$TMP_APPCAST"
-          mv "$TMP_APPCAST" docs/appcast.xml
-
-          grep -q "<sparkle:version>${BUILD_NUMBER}</sparkle:version>" docs/appcast.xml \
-            || { echo "appcast splice missed — check APPCAST-PREPEND-MARKER anchor" >&2; exit 1; }
-          if command -v xmllint >/dev/null; then
-            xmllint --noout docs/appcast.xml
-          fi
-
-          sed -i '' "s/version \".*\"/version \"${VERSION}\"/" "Casks/${APP_NAME}.rb"
-          sed -i '' "s/sha256 \".*\"/sha256 \"${DMG_SHA}\"/" "Casks/${APP_NAME}.rb"
-
-          git add docs/appcast.xml "Casks/${APP_NAME}.rb"
-          if git diff --cached --quiet; then
-            echo "no appcast/cask delta — skipping push"
-            exit 0
-          fi
-          git commit -m "Update appcast and cask for ${TAG}"
+          # Use the verified tag's helper, not code from a newer main checkout.
+          python3 "$RUNNER_TEMP/release_tools.py" metadata --repository "$GITHUB_REPOSITORY"
+          git add docs/appcast.xml Casks/mq-dir.rb
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -s -m "Update appcast and cask for $TAG"
           git push origin HEAD:main
-
-      - name: Mirror cask to the Homebrew tap repo
+      - name: Mirror current cask to Homebrew tap
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          # `brew install --cask h5nam/mq-dir/mq-dir` resolves to the
-          # tap at h5nam/homebrew-mq-dir, not this source repo —
-          # mirror the cask we just refreshed in main into that tap
-          # so the brew install path stays in sync with every
-          # release.
-          #
-          # Requires a PAT stored as `HOMEBREW_TAP_TOKEN` with
-          # `contents:write` on the tap. When the secret is missing
-          # (forks, untrusted CI runs) we skip silently — releases
-          # still go out, just without the brew bump.
-          if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
-            echo "HOMEBREW_TAP_TOKEN not set — skipping tap mirror"
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo 'Homebrew tap token is not configured; mirror skipped.'
             exit 0
           fi
           TAP_DIR="$(mktemp -d)"
-          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/h5nam/homebrew-mq-dir.git" "$TAP_DIR"
-          cp "Casks/${APP_NAME}.rb" "$TAP_DIR/Casks/${APP_NAME}.rb"
+          trap 'rm -rf "$TAP_DIR"' EXIT
+          gh auth setup-git
+          gh repo clone h5nam/homebrew-mq-dir "$TAP_DIR" -- --depth 1
+          cp Casks/mq-dir.rb "$TAP_DIR/Casks/mq-dir.rb"
           cd "$TAP_DIR"
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "Casks/${APP_NAME}.rb"
-          if git diff --cached --quiet; then
-            echo "tap cask already at ${TAG} — nothing to push"
-            exit 0
-          fi
-          git commit -m "Update cask to ${TAG}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Casks/mq-dir.rb
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -s -m "Update cask after $TAG"
           git push origin HEAD:main
-
-      # The notary .p8 holds a long-lived App Store Connect API key.
-      # GitHub-hosted runners are ephemeral, but any subsequent step or
-      # compromised dependency action could read it before the runner
-      # tears down — so wipe it on every exit path, success or failure.
-      - name: Wipe notary credentials
+      - name: Clean up signing credentials
         if: always()
         run: |
-          AUTH_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-          if [ -f "$AUTH_KEY_PATH" ]; then
-            shred -u "$AUTH_KEY_PATH" 2>/dev/null || rm -f "$AUTH_KEY_PATH"
+          rm -f "$RUNNER_TEMP/notary-auth.p8" "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/sparkle-priv"
+          if [[ -f "$RUNNER_TEMP/release.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/release.keychain-db"
           fi

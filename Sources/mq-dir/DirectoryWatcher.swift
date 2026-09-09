@@ -15,11 +15,14 @@ import Foundation
 /// us a raw `info` pointer with no Swift isolation context; we hop
 /// back to `DispatchQueue.main` before invoking `onChange`, so the
 /// caller's closure always runs on the main queue.
-final class DirectoryWatcher: @unchecked Sendable {
+final class DirectoryEventStream: @unchecked Sendable {
     private let onChange: @Sendable () -> Void
     private let debounceQueue: DispatchQueue
     private var stream: FSEventStreamRef?
     private var pendingDebounce: DispatchWorkItem?
+    private let debounceLock = NSLock()
+    private var stopped = false
+    private var revision: UInt64 = 0
     private static let debounceLatency: TimeInterval = 0.2
 
     /// Start watching `url`. FSEvents reports the entire subtree at
@@ -56,7 +59,7 @@ final class DirectoryWatcher: @unchecked Sendable {
             version: 0,
             info: Unmanaged.passRetained(box).toOpaque(),
             retain: nil,
-            release: DirectoryWatcher.contextRelease,
+            release: DirectoryEventStream.contextRelease,
             copyDescription: nil
         )
 
@@ -67,11 +70,11 @@ final class DirectoryWatcher: @unchecked Sendable {
 
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
-            DirectoryWatcher.callback,
+            DirectoryEventStream.callback,
             &context,
             pathsToWatch,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            DirectoryWatcher.debounceLatency,
+            DirectoryEventStream.debounceLatency,
             flags
         ) else {
             // FSEventStreamCreate returns nil on permission failures
@@ -93,6 +96,11 @@ final class DirectoryWatcher: @unchecked Sendable {
     /// VM calls `stop()` from `deinit` and may also call it explicitly
     /// when the active folder URL changes.
     func stop() {
+        debounceLock.lock()
+        stopped = true
+        pendingDebounce?.cancel()
+        pendingDebounce = nil
+        debounceLock.unlock()
         guard let stream else { return }
         FSEventStreamStop(stream)
         // `FSEventStreamInvalidate` invokes the context `release` callback
@@ -105,8 +113,6 @@ final class DirectoryWatcher: @unchecked Sendable {
         self.stream = nil
         // Cancel any in-flight debounce so a stale event doesn't
         // fire `onChange` after the watcher has been torn down.
-        pendingDebounce?.cancel()
-        pendingDebounce = nil
     }
 
     deinit {
@@ -118,15 +124,23 @@ final class DirectoryWatcher: @unchecked Sendable {
     /// `debounceQueue`, never on the main queue, so the cancel/replace
     /// dance is safe without extra locking.
     fileprivate func scheduleDebouncedNotify() {
+        debounceLock.lock()
+        guard !stopped else { debounceLock.unlock(); return }
         pendingDebounce?.cancel()
+        revision &+= 1
+        let expected = revision
         let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            DispatchQueue.main.async {
-                self.onChange()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.debounceLock.lock()
+                let active = !self.stopped && self.revision == expected
+                self.debounceLock.unlock()
+                if active { self.onChange() }
             }
         }
         pendingDebounce = work
-        debounceQueue.asyncAfter(deadline: .now() + DirectoryWatcher.debounceLatency, execute: work)
+        debounceLock.unlock()
+        debounceQueue.asyncAfter(deadline: .now() + DirectoryEventStream.debounceLatency, execute: work)
     }
 
     /// FSEvents C-callback. The `info` pointer is the *retained*
@@ -159,6 +173,64 @@ final class DirectoryWatcher: @unchecked Sendable {
 /// into a permanent leak). ARC weak references are thread-safe, so the
 /// callback's weak-load on `debounceQueue` is race-free.
 private final class WatcherContextBox {
-    weak var watcher: DirectoryWatcher?
-    init(_ watcher: DirectoryWatcher) { self.watcher = watcher }
+    weak var watcher: DirectoryEventStream?
+    init(_ watcher: DirectoryEventStream) { self.watcher = watcher }
+}
+
+
+/// One kernel stream per canonical folder, with independent subscriber lifetimes.
+final class DirectoryWatcher: @unchecked Sendable {
+    private let id = UUID()
+    private let key: String
+    private let lock = NSLock()
+    private var stopped = false
+
+    init(url: URL, onChange: @escaping @Sendable () -> Void) {
+        key = url.resolvingSymlinksInPath().standardizedFileURL.path
+        SharedDirectoryStreams.shared.add(id: id, key: key, url: url, callback: onChange)
+    }
+    func stop() {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        stopped = true
+        lock.unlock()
+        SharedDirectoryStreams.shared.remove(id: id, key: key)
+    }
+    deinit { stop() }
+
+    static var activeStreamCount: Int { SharedDirectoryStreams.shared.count }
+}
+
+private final class SharedDirectoryStreams: @unchecked Sendable {
+    static let shared = SharedDirectoryStreams()
+    private struct Entry {
+        let generation: UUID
+        let stream: DirectoryEventStream
+        var callbacks: [UUID: @Sendable () -> Void]
+    }
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+    var count: Int { lock.lock(); defer { lock.unlock() }; return entries.count }
+
+    func add(id: UUID, key: String, url: URL, callback: @escaping @Sendable () -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        if entries[key] != nil { entries[key]?.callbacks[id] = callback; return }
+        let generation = UUID()
+        let stream = DirectoryEventStream(url: url) { [weak self] in self?.notify(key: key, generation: generation) }
+        entries[key] = Entry(generation: generation, stream: stream, callbacks: [id: callback])
+    }
+    func remove(id: UUID, key: String) {
+        lock.lock()
+        entries[key]?.callbacks[id] = nil
+        let removed = entries[key]?.callbacks.isEmpty == true ? entries.removeValue(forKey: key)?.stream : nil
+        lock.unlock()
+        removed?.stop()
+    }
+    private func notify(key: String, generation: UUID) {
+        lock.lock()
+        let callbacks = entries[key]?.generation == generation ? Array(entries[key]!.callbacks.values) : []
+        lock.unlock()
+        callbacks.forEach { $0() }
+    }
 }

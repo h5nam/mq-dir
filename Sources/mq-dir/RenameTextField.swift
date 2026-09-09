@@ -83,6 +83,7 @@ struct RenameTextField: NSViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         private let parent: RenameTextField
         /// One-shot guard so focus + stem selection happen exactly once per
@@ -118,7 +119,7 @@ struct RenameTextField: NSViewRepresentable {
         /// Whole name unless there's a real extension (a "." that is neither
         /// leading nor trailing) on a file. Uses NSString length so the
         /// `NSRange` we hand the field editor is in the same UTF-16 units.
-        static func stemSelectionLength(of name: String, isDirectory: Bool) -> Int {
+        nonisolated static func stemSelectionLength(of name: String, isDirectory: Bool) -> Int {
             let ns = name as NSString
             guard !isDirectory else { return ns.length }
             let dotRange = ns.range(of: ".", options: .backwards)

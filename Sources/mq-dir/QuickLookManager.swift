@@ -129,11 +129,11 @@ final class QuickLookResponderView: NSView {
 
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
         guard let panel else { return }
-        QuickLookManager.shared.takeOwnership(of: panel)
+        MainActor.assumeIsolated { QuickLookManager.shared.takeOwnership(of: panel) }
     }
 
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
         guard let panel else { return }
-        QuickLookManager.shared.relinquishOwnership(of: panel)
+        MainActor.assumeIsolated { QuickLookManager.shared.relinquishOwnership(of: panel) }
     }
 }

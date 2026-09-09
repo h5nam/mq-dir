@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct MenuCommands: Commands {
+    @ObservedObject private var fileWork = FileWorkCenter.shared
     @ObservedObject var workspace: WorkspaceManager
 
     /// Resolved binding for a customisable action — user override
@@ -13,9 +14,23 @@ struct MenuCommands: Commands {
     }
 
     var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") {
+                if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.isFieldEditor {
+                    editor.undoManager?.undo()
+                } else if let job = fileWork.lastUndoableJob {
+                    fileWork.undo(job)
+                }
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            Button("Redo text editing") {
+                if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.isFieldEditor {
+                    editor.undoManager?.redo()
+                }
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+        }
         CommandGroup(replacing: .newItem) {
-            Button("New Window") { stub("File → New Window") }
-                .keyboardShortcut("n", modifiers: .command)
             Button("New Tab") { post(.newTab) }
                 .keyboardShortcut(binding(.newTab))
             Divider()
@@ -167,9 +182,7 @@ struct MenuCommands: Commands {
         .keyboardShortcut(key, modifiers: [.command, .option])
     }
 
-    private func stub(_ label: String) {
-        FileHandle.standardError.write(Data("[mq-dir M0 stub] \(label)\n".utf8))
-    }
+
 
     private func post(_ command: AppCommand) {
         command.post()

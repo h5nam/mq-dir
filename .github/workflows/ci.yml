@@ -25,11 +25,20 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Lint Swift (advisory)
+        continue-on-error: true
+        run: xcrun swift-format lint --recursive Sources Tests
+
+      - name: Test release validation
+        run: |
+          python3 -m unittest discover -s Tests/release -v
+          python3 Scripts/release_tools.py source
+
       - name: Test core library
         run: swift test
 
   xcodebuild:
-    name: Generated Xcode app build
+    name: Generated Xcode app build and service tests
     runs-on: macos-14
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
@@ -45,14 +54,15 @@ jobs:
           xcodegen --version
 
       - name: Generate project
-        run: xcodegen generate
+        run: Scripts/generate-project.sh
 
-      - name: Build app
+      - name: Build app and test services
         run: |
           xcodebuild \
             -project mq-dir.xcodeproj \
+            -onlyUsePackageVersionsFromResolvedFile \
             -scheme mq-dir \
             -configuration Debug \
             -destination "platform=macOS" \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            test

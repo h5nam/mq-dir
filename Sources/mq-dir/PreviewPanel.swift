@@ -23,6 +23,7 @@ struct PreviewPanel: View {
             header
             Divider().background(Theme.Color.separator)
             content
+                .id(focusedEntry)
         }
         .background(Theme.Color.paneBg)
     }
@@ -154,33 +155,8 @@ struct PreviewPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Largest markdown file we'll render in-pane. Past this we fall back
-    /// to Quick Look so a multi-MB log dumped with a `.md` extension can't
-    /// freeze the main actor or push the app into a memory blow-up.
-    private static let markdownMaxBytes: Int = 2_000_000
-
-    @ViewBuilder
     private func markdownView(for url: URL) -> some View {
-        // Reading the file synchronously is fine for the preview pane —
-        // MD files are small (KB range), and the user actively chose to
-        // view this file. Cap at 2 MB so a hostile or accidentally-huge
-        // .md doesn't OOM the app; oversize files defer to Quick Look.
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
-        if size <= Self.markdownMaxBytes,
-           let text = try? String(contentsOf: url, encoding: .utf8)
-        {
-            ScrollView {
-                Markdown(text)
-                    .markdownTheme(.gitHub)
-                    .markdownTextStyle {
-                        FontSize(13)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else {
-            QuickLookPreview(url: url)
-        }
+        MarkdownFilePreview(url: url)
     }
 
     // MARK: Selection helpers

@@ -143,10 +143,11 @@ private struct AppKitFileDragModifier: ViewModifier {
     }
 }
 
+@MainActor
 private final class AppKitFileDragSource: NSObject, NSDraggingSource {
     static let shared = AppKitFileDragSource()
 
-    func draggingSession(
+    nonisolated func draggingSession(
         _ session: NSDraggingSession,
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
