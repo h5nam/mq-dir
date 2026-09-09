@@ -123,6 +123,16 @@ else:
         self.assertNotIn('--clobber', calls[1])
         self.assertIn('--draft=false', calls[2])
 
+    def test_optional_tap_failure_does_not_invalidate_published_release(self):
+        step = next(s['run'] for s in WORKFLOW['jobs']['release']['steps']
+                    if s.get('name') == 'Mirror current cask to Homebrew tap')
+        result = subprocess.run(
+            ['bash', '-e', '-o', 'pipefail', '-c', step], cwd=self.root,
+            env=dict(self.env, FIXTURE_MODE='api-error', GH_TOKEN='expired', TAG='v0.3.0'),
+            text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('::warning::Homebrew tap mirror failed', result.stdout)
+
     def test_all_workflow_shell_blocks_parse(self):
         for job in WORKFLOW['jobs'].values():
             for step in job['steps']:
