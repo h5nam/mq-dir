@@ -268,18 +268,26 @@ jobs:
             echo 'Homebrew tap token is not configured; mirror skipped.'
             exit 0
           fi
-          TAP_DIR="$(mktemp -d)"
-          trap 'rm -rf "$TAP_DIR"' EXIT
-          gh auth setup-git
-          gh repo clone h5nam/homebrew-mq-dir "$TAP_DIR" -- --depth 1
-          cp Casks/mq-dir.rb "$TAP_DIR/Casks/mq-dir.rb"
-          cd "$TAP_DIR"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Casks/mq-dir.rb
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -s -m "Update cask after $TAG"
-          git push origin HEAD:main
+          # The tap is a convenience mirror. Its credentials must not turn a
+          # fully signed, notarized and published app release red after the
+          # primary appcast has already been updated successfully.
+          if ! (
+            set -e
+            TAP_DIR="$(mktemp -d)"
+            trap 'rm -rf "$TAP_DIR"' EXIT
+            gh auth setup-git
+            gh repo clone h5nam/homebrew-mq-dir "$TAP_DIR" -- --depth 1
+            cp Casks/mq-dir.rb "$TAP_DIR/Casks/mq-dir.rb"
+            cd "$TAP_DIR"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add Casks/mq-dir.rb
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -s -m "Update cask after $TAG"
+            git push origin HEAD:main
+          ); then
+            echo '::warning::Homebrew tap mirror failed. The primary release and appcast are published; repair HOMEBREW_TAP_TOKEN and rerun this version to retry the mirror.'
+          fi
       - name: Clean up signing credentials
         if: always()
         run: |

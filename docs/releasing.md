@@ -51,7 +51,9 @@ Each new release is created as a draft, receives the DMG, ZIP, `release.json`, a
 
 All release workflows share a concurrency group because they update the same appcast and cask. A release older than the current channel is rejected before publication. Existing appcast version/build collisions or differing signatures are errors; identical retries do not add another item. Retrying an already listed older release does not roll back the newer cask.
 
-If publication succeeded but appcast/cask push or tap mirroring failed, rerun the workflow with the same existing version. The workflow downloads and verifies the published files, skips rebuilding/signing/uploading, and retries the metadata work. API failures stop the job rather than being interpreted as "release not found".
+If publication succeeded but the primary appcast/cask push failed, rerun the workflow with the same existing version. The workflow downloads and verifies the published files, skips rebuilding/signing/uploading, and retries the metadata work. API failures stop the job rather than being interpreted as "release not found".
+
+The separate Homebrew tap is an optional mirror. Missing, expired or under-scoped `HOMEBREW_TAP_TOKEN` credentials emit a workflow warning without invalidating an already signed, notarized and published release. Repair the token and rerun the same version to retry the mirror; inspect the warning rather than assuming the tap was updated.
 
 An incomplete draft stops recovery for inspection; the workflow never blindly overwrites it. A legacy release without `release.json` cannot use automatic recovery. Inspect and repair that historical release separately or issue a new version. Do not replace a published version's assets to recover a failed build. The workflow's refusal to overwrite is independent of whether server-side immutable releases are enabled.
 
