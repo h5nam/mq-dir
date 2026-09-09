@@ -3,217 +3,6 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Listing & extraction
-
-/// One row in a `.zip` archive's table of contents — what `unzip -Z -1`
-/// emits, one path per line. Directories carry a trailing `/`; everything
-/// else is a file. We don't store sizes here because `-Z -1` doesn't
-/// emit them; the header line under `ZipPreviewView` covers the
-/// archive-level summary instead.
-struct ZipEntry: Identifiable, Hashable {
-    let path: String
-
-    var id: String { path }
-    var isDirectory: Bool { path.hasSuffix("/") }
-
-    /// Last component of the path. Used as the display label so deeply
-    /// nested rows don't blow out the narrow preview pane.
-    var displayName: String {
-        let trimmed = isDirectory ? String(path.dropLast()) : path
-        return trimmed.split(separator: "/").last.map(String.init) ?? trimmed
-    }
-
-    /// Indent depth in the listing — one step per `/` segment. Directories
-    /// at the same level as a file render at the same depth.
-    var depth: Int {
-        let stripped = isDirectory ? String(path.dropLast()) : path
-        return max(0, stripped.split(separator: "/").count - 1)
-    }
-}
-
-/// Wraps `/usr/bin/unzip` for read-only previewing — listing and
-/// single-entry extraction. Both paths drain the stdout pipe in
-/// chunks so a large entry doesn't block on a full pipe buffer; the
-/// extract path caps at `extractCap` so a 5 GB zip doesn't try to
-/// land in memory and the preview pane gives up gracefully instead.
-enum ZipPreviewService {
-    static let extractCap = 16 * 1024 * 1024
-
-    /// One archive table of contents. Resolves on a utility-priority
-    /// detached task so the main actor never blocks on the unzip
-    /// invocation.
-    static func list(archive: URL) async throws -> [ZipEntry] {
-        let data = try await runUnzip(arguments: ["-Z", "-1", archive.path], cap: nil)
-        let text = String(data: data, encoding: .utf8) ?? ""
-        return text
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .map { ZipEntry(path: String($0)) }
-    }
-
-    /// Stdout bytes of a single entry inside `archive`. `truncated`
-    /// flips when the entry exceeds `extractCap`; callers can then
-    /// surface a "too big to preview" hint instead of trying to render
-    /// a partial file.
-    struct ExtractionResult {
-        let data: Data
-        let truncated: Bool
-    }
-
-    static func extract(archive: URL, entry: String) async throws -> ExtractionResult {
-        // `entry` is passed to `unzip -p` as a match pattern. We do NOT
-        // use `--` to terminate option parsing because Info-ZIP doesn't
-        // honor it — a leading `-` is still read as an option flag.
-        // Instead `literalZipPattern` glob-escapes the name so it can
-        // only match itself (see helper for the leading-dash trick).
-        let data = try await runUnzip(
-            arguments: ["-p", archive.path, literalZipPattern(entry)],
-            cap: extractCap
-        )
-        return ExtractionResult(data: data, truncated: data.count >= extractCap)
-    }
-
-    /// Turn a literal archive entry name into an Info-ZIP match pattern
-    /// that only ever matches itself. Info-ZIP treats `*`, `?`, `[`, `]`
-    /// in the pattern as glob metacharacters and a leading `-` as an
-    /// option flag (and `--` is NOT respected as an end-of-options
-    /// sentinel). We neutralize each metacharacter by wrapping it in a
-    /// single-character class (`[*]`, `[?]`, `[[]`, `[]]`), which Info-ZIP
-    /// matches literally. A leading dash gets the same treatment (`-x`
-    /// → `[-]x`) so the name can never be parsed as an option.
-    static func literalZipPattern(_ entry: String) -> String {
-        var result = ""
-        result.reserveCapacity(entry.count + 4)
-        for (index, char) in entry.enumerated() {
-            switch char {
-            case "*", "?", "[", "]":
-                result.append("[")
-                result.append(char)
-                result.append("]")
-            case "-" where index == 0:
-                // Leading dash → option flag risk; escape as a class.
-                result.append("[-]")
-            default:
-                result.append(char)
-            }
-        }
-        return result
-    }
-
-    /// Process invocation shared between list/extract. Pulls stdout
-    /// in `availableData` chunks until the process closes its end of
-    /// the pipe, optionally discarding bytes past `cap` so a multi-GB
-    /// extraction never balloons memory while still draining the
-    /// pipe so unzip can finish. stderr is drained concurrently on a
-    /// background thread so a chatty error stream past the ~64 KB pipe
-    /// buffer can't deadlock the child against our stdout read. Task
-    /// cancellation (rapid selection changes) terminates the child so
-    /// abandoned invocations don't leave unzip running.
-    private static func runUnzip(arguments: [String], cap: Int?) async throws -> Data {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = arguments
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        return try await withTaskCancellationHandler {
-            try await Task.detached(priority: .utility) {
-                try process.run()
-
-                // Drain stderr concurrently on its own thread. If unzip
-                // writes more than the pipe buffer (~64 KB) to stderr,
-                // reading it only after waitUntilExit() would deadlock:
-                // the child blocks writing stderr while we block reading
-                // stdout. A background drain keeps both pipes flowing.
-                let errHandle = stderr.fileHandleForReading
-                let errBox = ErrDataBox()
-                let errThread = Thread {
-                    errBox.data = (try? errHandle.readToEnd()) ?? Data()
-                }
-                errThread.start()
-
-                var collected = Data()
-                let handle = stdout.fileHandleForReading
-                while true {
-                    if Task.isCancelled {
-                        // Abandoned by a newer selection — kill the child
-                        // so it doesn't keep churning through a huge zip.
-                        process.terminate()
-                        break
-                    }
-                    let chunk = handle.availableData
-                    if chunk.isEmpty { break }
-                    if let cap, collected.count >= cap {
-                        // Cap reached — keep reading to drain the pipe so
-                        // the child process can exit, but drop the bytes
-                        // on the floor.
-                        continue
-                    }
-                    if let cap, collected.count + chunk.count > cap {
-                        collected.append(chunk.prefix(cap - collected.count))
-                    } else {
-                        collected.append(chunk)
-                    }
-                }
-
-                process.waitUntilExit()
-                // stderr is small in the success path; wait for the drain
-                // thread so the error summary below is complete.
-                while errThread.isExecuting { usleep(1_000) }
-
-                if Task.isCancelled {
-                    throw CancellationError()
-                }
-
-                guard process.terminationStatus == 0 else {
-                    let errData = errBox.data
-                    let trimmed = String(data: errData, encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    let summary = trimmed.isEmpty
-                        ? "exit \(process.terminationStatus)"
-                        : trimmed
-                    throw NSError(
-                        domain: "mq-dir.zip-preview",
-                        code: Int(process.terminationStatus),
-                        userInfo: [NSLocalizedDescriptionKey: summary]
-                    )
-                }
-                return collected
-            }.value
-        } onCancel: {
-            // Fires the moment the surrounding Task is cancelled, even if
-            // the stdout read loop is parked in a blocking `availableData`.
-            if process.isRunning { process.terminate() }
-        }
-    }
-
-    /// Box so the stderr drain thread can hand its bytes back to the
-    /// reader. `@unchecked Sendable` is safe: the writer thread finishes
-    /// (joined via `isExecuting`) before any reader touches `data`.
-    private final class ErrDataBox: @unchecked Sendable {
-        var data = Data()
-    }
-
-    /// Best-effort sweep of leftover PDF-preview temp directories from a
-    /// prior run that crashed or was force-quit before `cleanupPDFTemp`
-    /// ran. Called once from `AppDelegate.applicationDidFinishLaunching`;
-    /// matches the `mq-dir-zip-preview-*` naming used by
-    /// `ZipPreviewView.decodedContent`.
-    static func sweepLeftoverTempDirs() {
-        let fm = FileManager.default
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        guard let contents = try? fm.contentsOfDirectory(
-            at: tmp,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return }
-        for dir in contents where dir.lastPathComponent.hasPrefix("mq-dir-zip-preview-") {
-            try? fm.removeItem(at: dir)
-        }
-    }
-}
-
 // MARK: - Preview view
 
 /// Right-side preview pane for a selected `.zip`. Top half is a
@@ -246,10 +35,15 @@ struct ZipPreviewView: View {
                 .frame(minHeight: 80)
         }
         .task(id: url) { await reloadListing() }
-        .onChange(of: selected) { _, new in
-            Task { await loadContent(for: new) }
+        .task(id: ContentRequest(archive: url, entry: selected)) {
+            await loadContent(for: selected)
         }
         .onDisappear { cleanupPDFTemp() }
+    }
+
+    private struct ContentRequest: Hashable {
+        let archive: URL
+        let entry: ZipEntry?
     }
 
     // MARK: Listing
@@ -427,7 +221,9 @@ struct ZipPreviewView: View {
 
     // MARK: Loaders
 
+    @MainActor
     private func reloadListing() async {
+        guard !Task.isCancelled else { return }
         loadingList = true
         listError = nil
         selected = nil
@@ -435,45 +231,34 @@ struct ZipPreviewView: View {
         cleanupPDFTemp()
         do {
             let result = try await ZipPreviewService.list(archive: url)
-            // Auto-select the first non-directory entry so the bottom
-            // half of the pane shows a real preview the moment the
-            // user clicks the .zip — otherwise we'd render the
-            // "Select an entry to preview" placeholder until they
-            // hunt for a row, which reads as broken UX.
-            let firstFile = result.first(where: { !$0.isDirectory })
-            await MainActor.run {
-                self.entries = result
-                self.loadingList = false
-                self.selected = firstFile
-            }
+            guard !Task.isCancelled else { return }
+            entries = result
+            loadingList = false
+            selected = result.first(where: { !$0.isDirectory })
         } catch {
-            await MainActor.run {
-                self.entries = []
-                self.listError = error.localizedDescription
-                self.loadingList = false
-            }
+            guard !Task.isCancelled else { return }
+            entries = []
+            listError = error.localizedDescription
+            loadingList = false
         }
     }
 
+    @MainActor
     private func loadContent(for entry: ZipEntry?) async {
+        guard !Task.isCancelled else { return }
         cleanupPDFTemp()
         guard let entry else { content = .idle; return }
-        if entry.isDirectory {
-            await MainActor.run { self.content = .directory }
-            return
-        }
-        await MainActor.run { self.content = .loading }
+        if entry.isDirectory { content = .directory; return }
+        content = .loading
         do {
             let result = try await ZipPreviewService.extract(archive: url, entry: entry.path)
-            // `decodedContent` runs on the main actor so the PDF branch can
-            // assign `pdfTempURL` synchronously before returning — see the
-            // race note in `decodedContent`.
-            let resolved = await MainActor.run {
-                decodedContent(for: entry, data: result.data, truncated: result.truncated)
-            }
-            await MainActor.run { self.content = resolved }
+            guard !Task.isCancelled else { return }
+            // No suspension between the final cancellation check, temp-file
+            // ownership update and publishing the new preview.
+            content = decodedContent(for: entry, data: result.data, truncated: result.truncated)
         } catch {
-            await MainActor.run { self.content = .error(error.localizedDescription) }
+            guard !Task.isCancelled else { return }
+            content = .error(error.localizedDescription)
         }
     }
 

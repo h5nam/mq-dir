@@ -32,7 +32,7 @@ struct RightClickAware: NSViewRepresentable {
 
 final class RightClickView: NSView {
     var onRightClick: (() -> Void)?
-    private var monitor: Any?
+    private var monitor: LocalEventMonitor?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -48,12 +48,12 @@ final class RightClickView: NSView {
         // from the hierarchy, but make sure deinit also drops the
         // global monitor in case the view is released without first
         // being detached.
-        if let monitor { NSEvent.removeMonitor(monitor) }
+        if let monitor { DispatchQueue.main.async { monitor.remove() } }
     }
 
     private func installMonitor() {
         guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { [weak self] event in
+        let token = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { [weak self] event in
             guard let self,
                   let window = self.window,
                   event.window === window
@@ -71,12 +71,24 @@ final class RightClickView: NSView {
             }
             return event
         }
+        if let token { monitor = LocalEventMonitor(token) }
     }
 
     private func removeMonitor() {
         if let monitor {
-            NSEvent.removeMonitor(monitor)
+            monitor.remove()
             self.monitor = nil
         }
+    }
+}
+
+
+@MainActor
+private final class LocalEventMonitor {
+    private var token: Any?
+    init(_ token: Any) { self.token = token }
+    func remove() {
+        if let token { NSEvent.removeMonitor(token) }
+        token = nil
     }
 }

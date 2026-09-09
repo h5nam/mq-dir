@@ -7,7 +7,11 @@ struct FileSystemService {
         self.fileManager = fileManager
     }
 
-    func enumerateDirectory(at url: URL, includingHidden: Bool = false) throws -> [FileEntry] {
+    func enumerateDirectory(
+        at url: URL, includingHidden: Bool = false,
+        isCancelled: @Sendable () -> Bool = { false }
+    ) throws -> [FileEntry] {
+        if isCancelled() { throw CancellationError() }
         let keys: Set<URLResourceKey> = [
             .contentModificationDateKey,
             .fileSizeKey,
@@ -29,6 +33,7 @@ struct FileSystemService {
         )
 
         return try urls.map { childURL in
+            if isCancelled() { throw CancellationError() }
             let values = try childURL.resourceValues(forKeys: keys)
             let isDirectory = values.isDirectory ?? false
             let name = childURL.lastPathComponent
@@ -38,7 +43,9 @@ struct FileSystemService {
             let hasCustomIcon = isDirectory && Self.folderHasCustomIcon(at: childURL)
 
             return FileEntry(
-                url: childURL,
+                // Foundation may return an alias (/private/var for /var).
+                // Keep URLs in the requested root's namespace for tree IDs.
+                url: Self.entryURL(components: [name], root: url, isDirectory: isDirectory),
                 name: name,
                 isDirectory: isDirectory,
                 size: isDirectory ? nil : values.fileSize.map(Int64.init),
@@ -63,9 +70,12 @@ struct FileSystemService {
         root: URL,
         query: String,
         includingHidden: Bool = false,
-        isCancelled: @Sendable () -> Bool = { false }
+        isCancelled: @Sendable () -> Bool = { false },
+        onProgress: (@Sendable ([FileEntry]) -> Void)? = nil,
+        filter: FileSearchFilter = .init(),
+        diagnostics: FileSearchDiagnostics? = nil
     ) throws -> [FileEntry] {
-        guard !query.isEmpty else { return [] }
+        guard (!query.isEmpty || filter.isActive), !isCancelled() else { return [] }
 
         let keys: Set<URLResourceKey> = [
             .contentModificationDateKey,
@@ -82,21 +92,19 @@ struct FileSystemService {
         }
 
         guard let enumerator = fileManager.enumerator(
-            at: root,
+            at: root.resolvingSymlinksInPath(),
             includingPropertiesForKeys: Array(keys),
             options: options,
-            errorHandler: { _, _ in true }
+            errorHandler: { _, _ in diagnostics?.recordError(); return true }
         ) else {
+            diagnostics?.recordError()
             return []
         }
 
         var results: [FileEntry] = []
-        var visited = 0
-
+        var nextProgressCount = 1
         for case let childURL as URL in enumerator {
-            // Cheap cancellation check; avoid per-item lock overhead on big trees.
-            visited &+= 1
-            if visited & 0xFF == 0, isCancelled() { return results }
+            if isCancelled() { return results }
 
             let name = childURL.lastPathComponent
             // Match name first (cheap) so the resourceValues fetch
@@ -105,8 +113,9 @@ struct FileSystemService {
             // sidebar's "click a tag" path on systems where the
             // tag is localised (e.g. "초록색") and so never appears
             // inside Latin-named files.
-            let nameMatches = name.localizedCaseInsensitiveContains(query)
+            let nameMatches = query.isEmpty || name.localizedCaseInsensitiveContains(query)
             let values = try? childURL.resourceValues(forKeys: keys)
+            if values == nil { diagnostics?.recordError(); continue }
             let tagMatches: Bool
             if nameMatches {
                 tagMatches = false
@@ -122,8 +131,9 @@ struct FileSystemService {
             let labelNumber = values?.labelNumber ?? 0
             let tagColors = Self.tagColors(for: childURL, names: tagNames, primaryLabelNumber: labelNumber)
             let hasCustomIcon = isDirectory && Self.folderHasCustomIcon(at: childURL)
-            results.append(FileEntry(
-                url: childURL,
+            let relativeComponents = Array(childURL.pathComponents.suffix(enumerator.level))
+            let entry = FileEntry(
+                url: Self.entryURL(components: relativeComponents, root: root, isDirectory: isDirectory),
                 name: name,
                 isDirectory: isDirectory,
                 size: isDirectory ? nil : (values?.fileSize).map(Int64.init),
@@ -134,10 +144,31 @@ struct FileSystemService {
                 labelNumber: labelNumber,
                 tagColors: tagColors,
                 hasCustomIcon: hasCustomIcon
-            ))
+            )
+            guard filter.matches(entry) else { continue }
+            results.append(entry)
+            // Geometric milestones expose early matches while bounding the
+            // number and retained size of UI snapshots for very large trees.
+            if results.count == nextProgressCount {
+                onProgress?(results)
+                nextProgressCount = nextProgressCount <= Int.max / 8 ? nextProgressCount * 8 : Int.max
+            }
         }
 
         return results
+    }
+
+    /// Preserve the caller's path namespace and exact Unicode filename bytes.
+    /// Foundation's metadata URLs can switch /var to /private/var; constructing
+    /// from a percent-encoded string also avoids re-normalizing NFC filenames.
+    private static func entryURL(components: [String], root: URL, isDirectory: Bool) -> URL {
+        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        let path = prefix + components.joined(separator: "/") + (isDirectory ? "/" : "")
+        if let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+           let result = URL(string: "file://" + encoded) {
+            return result
+        }
+        return components.reduce(root) { $0.appendingPathComponent($1) }
     }
 
     /// Pull per-tag colour indices from `com.apple.metadata:_kMDItemUserTags`.
@@ -300,12 +331,23 @@ struct FileSystemService {
         // Intermediate components are everything between the root depth and
         // the leaf's own last component (exclusive on both ends).
         var ancestors: [URL] = []
-        var current = root.standardizedFileURL
+        var current = root
         for component in leafComponents[rootComponents.count..<(leafComponents.count - 1)] {
             current = current.appendingPathComponent(component)
             ancestors.append(current)
         }
         return ancestors
+    }
+
+    /// Bookmarks may resolve /var as /private/var after relaunch. Rebase
+    /// remembered paths onto the resolved root without changing their suffix.
+    static func restoredPath(_ path: String, under root: URL) -> String? {
+        let source = URL(fileURLWithPath: path)
+        let rootParts = root.standardizedFileURL.pathComponents
+        let sourceParts = source.standardizedFileURL.pathComponents
+        guard sourceParts.starts(with: rootParts) else { return nil }
+        let suffix = source.pathComponents.suffix(sourceParts.count - rootParts.count)
+        return suffix.reduce(root) { $0.appendingPathComponent($1) }.path
     }
 
     /// Recursively sum the logical sizes of every file under `directory`.
@@ -325,8 +367,8 @@ struct FileSystemService {
     ///   and infinite loops on cyclic links — the enumerator's default
     ///   (no `.producesRelativePathURLs`, no follow) gives us this for free.
     ///
-    /// `isCancelled` is polled periodically (same cheap masked-counter trick
-    /// `enumerateMatching` uses) so a navigation away can stop a long walk;
+    /// `isCancelled` is checked before and throughout the walk so navigation
+    /// away can stop even a small tree;
     /// on cancel it returns the partial sum gathered so far, which is
     /// harmless because the caller treats the result as a cache entry it can
     /// recompute on demand.
@@ -334,6 +376,7 @@ struct FileSystemService {
         at directory: URL,
         isCancelled: @Sendable () -> Bool = { false }
     ) -> Int64 {
+        if isCancelled() { return 0 }
         let keys: Set<URLResourceKey> = [.fileSizeKey, .isDirectoryKey, .isRegularFileKey]
         guard let enumerator = fileManager.enumerator(
             at: directory,
@@ -345,10 +388,8 @@ struct FileSystemService {
         }
 
         var total: Int64 = 0
-        var visited = 0
         for case let childURL as URL in enumerator {
-            visited &+= 1
-            if visited & 0xFF == 0, isCancelled() { return total }
+            if isCancelled() { return total }
             // Only regular files contribute. Directories report no
             // meaningful `fileSize`; symlinks surface as non-regular and
             // are skipped so the link target's bytes aren't double-counted.

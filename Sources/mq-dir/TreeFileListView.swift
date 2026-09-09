@@ -39,8 +39,12 @@ struct TreeFileListView: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.vertical, 2)
             }
+            .scrollPosition(id: Binding(get: { viewModel.treeScrollID }, set: { value in
+                if !viewModel.isLoading && viewModel.loadingTreePaths.isEmpty && viewModel.treeScrollID != value { viewModel.treeScrollID = value }
+            }), anchor: .top)
             .focusable()
             .focused($treeFocused)
             .onAppear {
@@ -311,11 +315,24 @@ struct TreeFileListView: View {
         // nav can keep the moved-to row visible.
         .id(entry.id)
 
-        if isExpanded,
-           let children = viewModel.treeChildren[entry.url.path]
-        {
-            ForEach(FileEntry.treeOrdered(children)) { child in
-                treeRow(child, depth: depth + 1)
+        if isExpanded {
+            if let error = viewModel.treeLoadErrors[entry.url.path] {
+                HStack {
+                    Text(error).lineLimit(2)
+                    Button("Retry") { viewModel.retryTreeChildren(entry.url) }
+                }
+                .font(.caption)
+                .padding(.leading, CGFloat(depth + 1) * 14 + 24)
+            } else if viewModel.loadingTreePaths.contains(entry.url.path) {
+                HStack {
+                    ProgressView().controlSize(.mini)
+                    Text("Loading…").font(.caption)
+                }
+                .padding(.leading, CGFloat(depth + 1) * 14 + 24)
+            } else if let children = viewModel.treeChildren[entry.url.path] {
+                ForEach(FileEntry.treeOrdered(children)) { child in
+                    treeRow(child, depth: depth + 1)
+                }
             }
         }
     }

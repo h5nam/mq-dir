@@ -36,7 +36,7 @@ Tests only:
 swift test
 ```
 
-Full app tests run in CI on `macos-14` runners against a generated Xcode project.
+The generated Xcode project builds the app and runs isolated AppKit/Markdown service tests in CI on `macos-14`. These tests do not launch the production app or read your saved workspace.
 
 ### First launch with an unsigned local build
 
@@ -50,7 +50,7 @@ Then double-click. Future launches work without intervention.
 
 ## Code style
 
-- SwiftLint config TBD in M0.1. For now, match the existing style:
+- `.swift-format` configures 4-space indentation and a 120-column line limit. Match the existing style:
   - 4-space indent.
   - `final class` by default.
   - SwiftUI `View` structs end in `View` (`MainWindowView`, `PaneView`).
@@ -60,7 +60,7 @@ Then double-click. Future launches work without intervention.
 ## Tests
 
 - Unit tests live in `Tests/mqdirCoreTests/` and run via `swift test`.
-- App-level tests (UI, persistence end-to-end) live in `Tests/mqdirAppTests/` (added in M1) and run via `xcodebuild test`.
+- App service tests live in `Tests/mqdirAppTests/` and run via `xcodebuild -project mq-dir.xcodeproj -scheme mq-dir -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO test` after `Scripts/generate-project.sh`. Full UI and persistence end-to-end coverage remains planned.
 - New persistence schema versions require a `testMigration_vN_to_vN+1_preservesAllFields` test before merge.
 
 ## PR review
@@ -71,11 +71,7 @@ Then double-click. Future launches work without intervention.
 
 ## Release process
 
-Maintainer-only:
-
-1. Bump `MARKETING_VERSION` in `project.yml`.
-2. Tag: `git tag vX.Y.Z && git push --tags`.
-3. `release.yml` builds, signs, notarizes, and uploads the `.dmg`. The release body is seeded from `git log <prev-tag>..<this-tag>` — polish it on the [Releases page](https://github.com/h5nam/mq-dir/releases) if you want a narrative beyond the bullet list.
+Maintainer-only: run `Scripts/release.sh --dry-run <version>` on clean `main`, then `Scripts/release.sh <version>`. CI checks the exact tag, tests the core and app services, validates bundle metadata, and publishes new assets without overwriting an existing release. Follow the [release guide](docs/releasing.md) for setup and retries. Version/build settings and `Config/Package.resolved` changes must be reviewed together with the generated bundle validation.
 
 ## Reporting bugs
 

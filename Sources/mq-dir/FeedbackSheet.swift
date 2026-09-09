@@ -148,6 +148,9 @@ struct FeedbackSheet: View {
 
     private var buttonRow: some View {
         HStack {
+            if FeedbackSecrets.discordWebhookURL == nil {
+                Link("Open issue tracker", destination: URL(string: "https://github.com/h5nam/mq-dir/issues/new/choose")!)
+            }
             Spacer()
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -156,7 +159,7 @@ struct FeedbackSheet: View {
                 Task { await send() }
             }
             .keyboardShortcut(.defaultAction)
-            .disabled(isSending || trimmedMessage.isEmpty)
+            .disabled(isSending || trimmedMessage.isEmpty || FeedbackSecrets.discordWebhookURL == nil)
         }
     }
 
@@ -261,7 +264,10 @@ struct FeedbackSheet: View {
                 .replacingOccurrences(of: "\"", with: "")
 
             // FIX 1 & 2: enforce per-file and aggregate size caps; collect dropped names.
-            guard let fileData = try? Data(contentsOf: fileURL) else {
+            let attachmentLimit = maxAttachmentBytes
+            guard let fileData = try? await Task.detached(priority: .utility, operation: {
+                try PreviewTextLoader.readData(at: fileURL, maximumBytes: attachmentLimit)
+            }).value else {
                 droppedFilenames.append(rawName)
                 continue
             }

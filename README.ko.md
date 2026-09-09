@@ -33,11 +33,7 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 - 🔎 **Pane별 재귀 검색** — debounce, case-insensitive substring 매치, 현재 폴더 서브트리 전체. ⌘F.
 - 🔄 **앱 내 자동 업데이트** — Sparkle 2가 24시간마다 appcast를 polling, 새 릴리즈가 있으면 사이드바에 "Update Available" 버튼이 떠서 표준 install / relaunch 흐름이 진행됩니다.
 - 💬 **앱 내 Send Feedback** — 사이드바 footer → 짧은 노트 + 옵션 스크린샷을 메인테이너에게 바로 전송(이메일 클라이언트 우회).
-- 🔗 **[cmux](https://cmux.com) 연동** — 사이드바에 CMUX 섹션이 생기고 cmux 워크스페이스를 미러링합니다. 행 클릭 시 작업 디렉토리가 활성 pane에서 열리고 (⌘-클릭은 새 탭). cmux는 자체 자식 프로세스만 socket 접근하도록 잠겨 있어 둘 중 하나로 풀어줘야 합니다:
-  - **간단:** cmux → Settings → Automation → Socket Control Mode = Allow All.
-  - **엄격:** Socket Control Mode = Password로 두고 `launchctl setenv CMUX_SOCKET_PASSWORD <pw>` (GUI 실행 앱에 환경변수가 닿게) 한 다음 mq-dir 재실행.
-
-  cmux가 설치되어 있지 않으면 섹션은 자동으로 숨겨집니다.
+- 🔗 **코딩 앱 선택 연동** — 사이드바에서 cmux, Orca, Paseo, Claude Code Desktop, Codex Desktop을 선택한 뒤 Sync로 로컬 작업 폴더를 불러옵니다. 클릭하면 활성 pane, ⌘-클릭하면 새 탭에서 열립니다. 앱 선택은 재실행 후에도 유지됩니다. [설정 및 지원 범위](docs/integrations.md)를 참고하세요.
 - 🎨 **macOS 네이티브 룩** — SwiftUI + AppKit, 시스템 테마 토큰, 손으로 다듬은 앱 아이콘.
 
 **로드맵**
@@ -89,12 +85,15 @@ swift test
 
 ## 프라이버시
 
+Markdown 미리보기의 외부 이미지는 기본 차단됩니다. 문서에서 **Load external images**를 누르면 해당 이미지 서버로 요청이 전송됩니다. 다른 문서를 열면 다시 차단됩니다. 로컬 이미지는 외부 이미지 서버 요청 없이 표시합니다.
+
 **외부로 전화 거는 일 없습니다. Telemetry 0, Crash report 0, Analytics 0. v1에서는 영원히.**
 
-mq-dir은 기본적으로 로컬에서만 돌아갑니다. 외부로 나가는 트래픽은 좁게 정의된 두 가지뿐, 둘 다 소스로 검증 가능합니다:
+mq-dir은 기본적으로 로컬에서만 돌아갑니다. 외부로 나가는 트래픽은 아래에 설명한 경우로 제한되며, 모두 소스로 검증 가능합니다:
 
-1. **Sparkle 업데이트 체크** — 24시간마다 `https://h5nam.github.io/mq-dir/appcast.xml`을 받아옴. 공개 파일이고 식별 정보는 요청에 붙이지 않습니다.
-2. **Send Feedback** — 사이드바 footer에서 *직접* 버튼을 누른 경우에만, 메시지 + 옵션 스크린샷을 메인테이너 Discord 웹훅에 전송. 안 누르면 아무것도 안 나갑니다.
+1. **Markdown 외부 이미지** — 위의 명시적 불러오기 동작을 사용한 경우에만 이미지 서버에 요청합니다.
+2. **Sparkle 업데이트 체크** — 24시간마다 `https://h5nam.github.io/mq-dir/appcast.xml`을 받아옴. 공개 파일이고 식별 정보는 요청에 붙이지 않습니다.
+3. **Send Feedback** — 사이드바 footer에서 *직접* 버튼을 누른 경우에만, 메시지 + 옵션 스크린샷을 메인테이너 Discord 웹훅에 전송. 안 누르면 아무것도 안 나갑니다.
 
 백그라운드 분석, 사용 ping, 크래시 리포트 업로드 없음. 로컬 상태는 `~/Library/Application Support/com.mqdir.app/`에 저장됩니다.
 
@@ -111,31 +110,13 @@ PR 환영합니다. 기여는 [DCO](https://developercertificate.org/) 방식으
 ## 릴리즈 (메인테이너 전용)
 
 ```bash
-Scripts/release.sh 0.1.3
+Scripts/release.sh --dry-run 0.3.0
+Scripts/release.sh 0.3.0
 ```
 
-이게 전부입니다. 스크립트가 버전 bump → Developer ID로 Release 빌드 → 모든 nested binary inside-out 재서명 (Sparkle helper들은 서명을 자동 상속하지 않음) → `mq-dir-notary` keychain profile로 notarize + staple → DMG 빌드 + EdDSA 서명 → `docs/appcast.xml`에 새 `<item>` 추가 → `Casks/mq-dir.rb` bump → 태그 + push → GitHub Release 생성까지 한 번에 처리합니다.
+깨끗한 `main`에서 실행합니다. 스크립트는 버전·빌드 번호를 갱신하고 커밋과 태그를 함께 push합니다. CI가 해당 태그의 테스트·번들 정보를 검증한 뒤 서명·공증·배포합니다. 이미 게시된 버전은 파일을 덮어쓰지 않으며, 재실행 시 게시된 파일을 검증해 appcast/cask 갱신만 복구합니다.
 
-**최초 1회 셋업** (메인테이너 머신마다):
-
-```bash
-Scripts/sparkle-setup.sh
-# → Sparkle 바이너리 도구를 받고 macOS keychain에 EdDSA 키 페어를
-#   생성한 뒤 공개키를 출력. 이 프로젝트는 이미 project.yml의
-#   SUPublicEDKey에 박혀 있으니, 키 로테이션이 필요한 경우에만
-#   다시 돌리면 됩니다.
-
-xcrun notarytool store-credentials mq-dir-notary \
-    --apple-id <your-apple-id> --team-id WKV6T7K33K \
-    --password <app-specific-password>
-
-brew install create-dmg
-gh auth login
-```
-
-여기에 더해 Developer ID 개인키에 codesign 접근 권한을 한 번 부여해야 합니다: Keychain Access → login → My Certificates → `Developer ID Application: …` 펼치기 → 개인키 우클릭 → Get Info → Access Control → **Allow all applications to access this item**. 이걸 안 해두면 릴리즈마다 inside-out 재서명 도중 Mac 비밀번호 프롬프트가 ~10번 뜹니다.
-
-GitHub Pages는 이미 `main` / `/docs`를 서빙하도록 설정되어 있어 `https://h5nam.github.io/mq-dir/appcast.xml`은 push 후 1분 안에 반영됩니다.
+자격 증명, 의존성 잠금, 실패 시 복구 절차는 [릴리스 가이드](docs/releasing.md)를 참고하세요. 앱 프로젝트는 `Scripts/generate-project.sh`로 생성해야 저장소의 의존성 잠금이 적용됩니다.
 
 ## 라이선스
 

@@ -7,7 +7,7 @@ struct SidebarView: View {
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject var updateManager: UpdateManager
     @ObservedObject var repoCallout: RepoCalloutController
-    @ObservedObject var cmux: CmuxSidebarModel
+    @ObservedObject var integrations: IntegrationsSidebarModel
     @Binding var selectedURL: URL?
     /// Distinct Finder tags observed in the focused tab's current
     /// listing. Empty when the focused folder has no tagged items.
@@ -61,10 +61,8 @@ struct SidebarView: View {
 
                     projectsSection
 
-                    if cmux.cmuxAvailable {
-                        cmuxSection
-                            .padding(.top, 8)
-                    }
+                    integrationSection
+                        .padding(.top, 8)
                 }
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -469,6 +467,7 @@ struct SidebarView: View {
         }
         .contextMenu {
             Button("Rename") { startProjectRename(project) }
+            Button("Duplicate Project") { workspace.duplicateProject(project.id) }
             Button("Delete", role: .destructive) {
                 workspace.delete(project.id)
             }
@@ -509,71 +508,58 @@ struct SidebarView: View {
         return provider
     }
 
-    // MARK: cmux
+    // MARK: Coding app integrations
 
-    private var cmuxSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                Text("CMUX")
-                    .font(Theme.Font.sidebarHeader)
-                    .tracking(0.5)
-                    .foregroundStyle(Theme.Color.labelTertiary)
-                Spacer(minLength: 0)
-                cmuxSyncChip
+    private var integrationSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                IntegrationAppPicker(selection: $integrations.provider)
+                integrationSyncChip
             }
             .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
-
-            if cmux.workspaces.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(cmuxEmptyStateMessage)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.Color.labelTertiary)
-                    if cmux.lastSyncDate == nil && cmux.lastError == nil {
-                        // Sidebar real estate is tight — give the one
-                        // recipe most users will pick and link to the
-                        // README for the password-mode alternative.
-                        Text("Requires cmux → Settings → Automation → Socket Control Mode = Allow All. See README for the password-mode alternative.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.Color.labelTertiary)
-                            .opacity(0.75)
-                    }
-                }
+            Text(integrations.provider.sourceDescription)
+                .font(.system(size: 9))
+                .foregroundStyle(Theme.Color.labelTertiary)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let error = integrations.lastError {
+                Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 14)
+            }
+            if integrations.workspaces.isEmpty {
+                Text(integrationEmptyStateMessage).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14)
             } else {
-                ForEach(cmux.workspaces) { ws in
-                    cmuxRow(ws)
-                }
+                ForEach(integrations.workspaces) { integrationRow($0) }
+            }
+            if let app = WorkspaceIntegrationClient.applicationURL(for: integrations.provider) {
+                Button("Open \(integrations.provider.title)") { NSWorkspace.shared.open(app) }
+                    .font(.caption).padding(.horizontal, 14)
             }
         }
+        .padding(.vertical, 8)
     }
 
     /// Pill-shaped Sync button. Higher hit-target + label than the bare
     /// refresh icon — easier to find for someone who's never used the
     /// integration before. Swaps to "Syncing…" with a spinner while a
     /// fetch is in flight, and disables to prevent double-taps.
-    private var cmuxSyncChip: some View {
+    private var integrationSyncChip: some View {
         Button {
-            Task { await cmux.sync() }
+            Task { await integrations.sync() }
         } label: {
             HStack(spacing: 4) {
-                if cmux.isSyncing {
+                if integrations.isSyncing {
                     ProgressView()
                         .controlSize(.mini)
                         .scaleEffect(0.6)
                         .frame(width: 8, height: 8)
                 }
-                Text(cmux.isSyncing ? "Syncing\u{2026}" : "Sync")
+                Text(integrations.isSyncing ? "Syncing\u{2026}" : "Sync")
                     .font(.system(size: 10, weight: .medium))
             }
             .foregroundStyle(Theme.Color.label)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(
-                Capsule().fill(Color.white.opacity(cmux.isSyncing ? 0.04 : 0.10))
+                Capsule().fill(Color.white.opacity(integrations.isSyncing ? 0.04 : 0.10))
             )
             .overlay(
                 Capsule().strokeBorder(Theme.Color.separator, lineWidth: 0.5)
@@ -581,22 +567,22 @@ struct SidebarView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .disabled(cmux.isSyncing)
-        .help("Sync cmux workspaces")
+        .disabled(integrations.isSyncing)
+        .help("Sync \(integrations.provider.title) workspaces")
     }
 
     /// Picks the right one-liner for an empty workspaces list. Three
     /// distinct states the previous version collapsed to one message:
     /// (1) sync errored, (2) sync ran but cmux genuinely has no
     /// workspaces, (3) we haven't synced yet.
-    private var cmuxEmptyStateMessage: String {
-        if let err = cmux.lastError { return err }
-        if cmux.lastSyncDate != nil { return "No cmux workspaces yet." }
-        return "Press Sync to fetch cmux workspaces."
+    private var integrationEmptyStateMessage: String {
+        if integrations.lastError != nil { return "Check the selected app, then retry Sync." }
+        if integrations.lastSyncDate != nil { return "No local workspaces found." }
+        return "Press Sync to load workspaces."
     }
 
-    private func cmuxRow(_ ws: CmuxWorkspace) -> some View {
-        let cwd = ws.currentDirectory.flatMap { URL(fileURLWithPath: $0) }
+    private func integrationRow(_ ws: IntegrationWorkspace) -> some View {
+        let cwd: URL? = FileManager.default.fileExists(atPath: ws.currentDirectory) ? URL(fileURLWithPath: ws.currentDirectory) : nil
         let isActive = cwd != nil && selectedURL == cwd
 
         return Button {
@@ -644,7 +630,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .disabled(cwd == nil)
-        .help(ws.currentDirectory ?? "no working directory")
+        .help(cwd == nil ? "Unavailable on this Mac: " + ws.currentDirectory : ws.currentDirectory)
     }
 
     // MARK: Section chrome
@@ -805,5 +791,73 @@ private struct ProjectReorderDropDelegate: DropDelegate {
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         DropProposal(operation: .move)
+    }
+}
+
+/// Compact app switcher; native menu behavior and keyboard navigation are preserved.
+private struct IntegrationAppPicker: View {
+    @Binding var selection: WorkspaceProvider
+    @State private var isHovered = false
+
+    var body: some View {
+        Menu {
+            ForEach(WorkspaceProvider.allCases) { provider in
+                Button {
+                    selection = provider
+                } label: {
+                    HStack {
+                        Text(provider.title)
+                        if provider == selection {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                appIcon
+                    .frame(width: 16, height: 16)
+                Text(selection.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.Color.label)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 3)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Theme.Color.labelSecondary)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(isHovered ? 0.08 : 0.045))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Theme.Color.separator.opacity(isHovered ? 0.8 : 0.5), lineWidth: 0.5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .onHover { isHovered = $0 }
+        .help("Choose integration app — " + selection.title)
+        .accessibilityLabel("Integration app")
+        .accessibilityValue(selection.title)
+    }
+
+    @ViewBuilder
+    private var appIcon: some View {
+        if let url = WorkspaceIntegrationClient.applicationURL(for: selection) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(systemName: selection == .cmux || selection == .paseo ? "terminal" : "app.dashed")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.Color.labelSecondary)
+        }
     }
 }

@@ -207,6 +207,27 @@ public enum FileOperationService {
         return failures
     }
 
+    /// A drag defaults to move only when both volumes are known and equal.
+    /// Check each source independently because a drag can span volumes.
+    static func transferDroppedItems(
+        _ sources: [URL],
+        into destinationFolder: URL,
+        forceCopy: Bool,
+        normalizeHangul: Bool = false,
+        volumeIdentifier: (URL) -> AnyHashable? = {
+            (try? $0.resourceValues(forKeys: [.volumeIdentifierKey]))?.volumeIdentifier as? AnyHashable
+        }
+    ) -> [(URL, Error)] {
+        let destinationVolume = volumeIdentifier(destinationFolder)
+        return sources.flatMap { source in
+            // Moving a symlink moves the link, so use its parent's volume.
+            let sourceVolume = volumeIdentifier(source.deletingLastPathComponent())
+            let sameVolume = sourceVolume != nil && sourceVolume == destinationVolume
+            return transfer([source], into: destinationFolder, move: !forceCopy && sameVolume,
+                            normalizeHangul: normalizeHangul)
+        }
+    }
+
     /// After a successful copy/move/duplicate, rename the resulting file
     /// to NFC form on disk when `enabled` and its name is decomposed
     /// Hangul (NFD). A rename failure is swallowed — the transfer itself
@@ -304,8 +325,18 @@ public enum FileOperationService {
     }
 
     /// Error surfaced by `rename` when the destination already exists.
-    public enum RenameError: Error, Equatable {
+    public enum RenameError: Error, Equatable, LocalizedError {
         case destinationExists(name: String)
+        case invalidName
+
+        public var errorDescription: String? {
+            switch self {
+            case .destinationExists(let name):
+                return "An item named '\(name)' already exists in this folder."
+            case .invalidName:
+                return "Enter a file name without slashes. The names '.' and '..' are not allowed."
+            }
+        }
     }
 
     /// Rename `source` to `newName` within its parent folder. Refuses to
@@ -319,6 +350,10 @@ public enum FileOperationService {
         to newName: String,
         fileManager: FileManager = .default
     ) throws -> URL {
+        guard !newName.isEmpty, newName != ".", newName != "..",
+              !newName.contains("/"), !newName.contains("\0") else {
+            throw RenameError.invalidName
+        }
         let dest = source.deletingLastPathComponent().appendingPathComponent(newName)
         guard !fileManager.fileExists(atPath: dest.path) else {
             throw RenameError.destinationExists(name: newName)
@@ -330,10 +365,11 @@ public enum FileOperationService {
     // MARK: Compress
 
     /// Why a compress request can't run before any Process spins up.
-    public enum CompressError: Error, Equatable {
+    public enum CompressError: Error, Equatable, LocalizedError {
         /// Selection spanned more than one parent folder — zip's relative
         /// pathing assumes a single working directory.
         case crossFolder
+        public var errorDescription: String? { "Select items from one folder to compress them together." }
     }
 
     /// The `stem` Finder would name a compress destination: a single
@@ -373,35 +409,46 @@ public enum FileOperationService {
         return (parent, destination, urls.map { $0.url.lastPathComponent })
     }
 
-    /// Drive `/usr/bin/zip` with `currentDirectoryURL = parent` so the
-    /// archive stores relative paths. `-r` recurses, `-y` preserves
-    /// symlinks, `-q` silences per-file progress. Throws on non-zero exit
-    /// with the trimmed stderr (or `exit N`) as the message — identical to
-    /// the legacy `runCompression`.
+    /// Build in a private sibling directory, then publish without overwriting
+    /// any existing destination. Failed/cancelled work is never published.
     public static func runCompression(
         parent: URL,
         sources: [String],
-        destination: URL
+        destination: URL,
+        timeout: TimeInterval = 3600,
+        isCancelled: @Sendable () -> Bool = { false }
     ) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", "-y", "-q", destination.path] + sources
-        process.currentDirectoryURL = parent
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = Pipe()
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
-            let trimmed = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
-            throw NSError(
-                domain: "mq-dir.compress",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: summary]
-            )
+        if isCancelled() { throw ProcessRunner.Failure.cancelled }
+        guard !sources.isEmpty, sources.allSatisfy({
+            !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("/") && !$0.contains("\0")
+        }) else { throw RenameError.invalidName }
+        let staging = try makeArchiveStaging(for: destination)
+        defer { removeArchiveStaging(staging) }
+        let archive = staging.appendingPathComponent("archive.zip")
+        _ = try ProcessRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/zip"),
+            arguments: ["-r", "-y", "-q", archive.path] + sources.map { "./" + $0 },
+            directory: parent, timeout: timeout, isCancelled: isCancelled
+        )
+        if isCancelled() { throw ProcessRunner.Failure.cancelled }
+        try FileManager.default.moveItem(at: archive, to: destination)
+    }
+
+    private static func makeArchiveStaging(for destination: URL) throws -> URL {
+        if FileManager.default.fileExists(atPath: destination.path) {
+            throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: destination.path])
+        }
+        let staging = destination.deletingLastPathComponent()
+            .appendingPathComponent(".mqdir-archive-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false,
+                                               attributes: [.posixPermissions: 0o700])
+        return staging
+    }
+
+    private static func removeArchiveStaging(_ staging: URL) {
+        do { try FileManager.default.removeItem(at: staging) }
+        catch {
+            FileHandle.standardError.write(Data("[mq-dir archive] Could not remove staging folder \(staging.path): \(error)\n".utf8))
         }
     }
 
@@ -450,46 +497,36 @@ public enum FileOperationService {
         }
     }
 
-    /// Drive ditto/tar against the archive. ditto's `-x -k` handles zip
-    /// (preserves resource forks); tar's `-xf` handles plain tar and
-    /// `-xzf` picks up gzip for `.tar.gz`/`.tgz`. `destination` must NOT
-    /// exist yet — it's created here with the right mode bits. Throws on
-    /// non-zero exit with the trimmed stderr — identical to the legacy
-    /// `runExtraction`.
+    /// Extract privately and publish only after the tool exits successfully.
     public static func runExtraction(
         kind: ArchiveKind,
         archive: URL,
-        destination: URL
+        destination: URL,
+        timeout: TimeInterval = 3600,
+        isCancelled: @Sendable () -> Bool = { false }
     ) throws {
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        let process = Process()
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = Pipe()
+        if isCancelled() { throw ProcessRunner.Failure.cancelled }
+        let staging = try makeArchiveStaging(for: destination)
+        defer { removeArchiveStaging(staging) }
+        let contents = staging.appendingPathComponent("contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: false)
+        let executable: String
+        let arguments: [String]
         switch kind {
         case .zip:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-            process.arguments = ["-x", "-k", archive.path, destination.path]
+            executable = "/usr/bin/ditto"
+            arguments = ["-x", "-k", archive.path, contents.path]
         case .tar:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            process.arguments = ["-xf", archive.path, "-C", destination.path]
+            executable = "/usr/bin/tar"
+            arguments = ["-xf", archive.path, "-C", contents.path]
         case .tarGz:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            process.arguments = ["-xzf", archive.path, "-C", destination.path]
+            executable = "/usr/bin/tar"
+            arguments = ["-xzf", archive.path, "-C", contents.path]
         }
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
-            let trimmed = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
-            throw NSError(
-                domain: "mq-dir.extract",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: summary]
-            )
-        }
+        _ = try ProcessRunner.run(executable: URL(fileURLWithPath: executable), arguments: arguments,
+                                  timeout: timeout, isCancelled: isCancelled)
+        if isCancelled() { throw ProcessRunner.Failure.cancelled }
+        try FileManager.default.moveItem(at: contents, to: destination)
     }
 
     /// Extract one archive into a fresh sibling folder named after its
@@ -501,12 +538,14 @@ public enum FileOperationService {
     public static func extract(
         archive: URL,
         kind: ArchiveKind,
-        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        timeout: TimeInterval = 3600,
+        isCancelled: @Sendable () -> Bool = { false }
     ) throws -> URL {
         let parent = archive.deletingLastPathComponent()
         let stem = archiveStem(for: archive, kind: kind)
         let dest = uniqueExtractionDirectory(in: parent, stem: stem, fileExists: fileExists)
-        try runExtraction(kind: kind, archive: archive, destination: dest)
+        try runExtraction(kind: kind, archive: archive, destination: dest, timeout: timeout, isCancelled: isCancelled)
         return dest
     }
 }

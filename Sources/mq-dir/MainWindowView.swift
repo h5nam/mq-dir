@@ -2,10 +2,12 @@ import AppKit
 import SwiftUI
 
 struct MainWindowView: View {
+    @ObservedObject private var fileWork = FileWorkCenter.shared
+    @State private var folderComparison: FolderComparisonRequest?
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject var updateManager: UpdateManager
     @ObservedObject var repoCallout: RepoCalloutController
-    @StateObject private var cmux = CmuxSidebarModel()
+    @StateObject private var integrations: IntegrationsSidebarModel
 
     @StateObject private var pane0: PaneTabsViewModel
     @StateObject private var pane1: PaneTabsViewModel
@@ -57,6 +59,7 @@ struct MainWindowView: View {
         repoCallout: RepoCalloutController
     ) {
         self.workspace = workspace
+        self._integrations = StateObject(wrappedValue: IntegrationsSidebarModel(provider: workspace.workspace.settings.integrationProvider))
         self.updateManager = updateManager
         self.repoCallout = repoCallout
         let project = workspace.activeProject
@@ -65,7 +68,7 @@ struct MainWindowView: View {
 
         self._layout = State(initialValue: state.layout)
         self._focusedPaneIndex = State(
-            initialValue: min(max(state.focusedPaneIndex, 0), 3)
+            initialValue: min(max(state.focusedPaneIndex, 0), state.layout.paneCount - 1)
         )
 
         // Always rehydrate four panes — any layout shrink stashes the
@@ -88,7 +91,19 @@ struct MainWindowView: View {
 
     var body: some View {
         windowChrome
+            .alert("Workspace recovery", isPresented: Binding(
+                get: { workspace.recoveryMessage != nil },
+                set: { if !$0 { workspace.recoveryMessage = nil } }
+            )) {
+                Button("OK") { workspace.recoveryMessage = nil }
+            } message: {
+                Text(workspace.recoveryMessage ?? "")
+            }
             .background(Theme.Color.windowBg)
+            .sheet(item: $folderComparison) { FolderComparisonView(request: $0) }
+            .onDisappear { scheduleSave() }
+            .onReceive(NotificationCenter.default.publisher(for: ExternalFolderRequests.changed)) { _ in openExternalFolders() }
+            .onChange(of: integrations.provider) { _, provider in workspace.setIntegrationProvider(provider) }
             .modifier(SaveTriggers(
                 pane0: pane0, pane1: pane1, pane2: pane2, pane3: pane3,
                 sidebar: sidebar,
@@ -128,7 +143,15 @@ struct MainWindowView: View {
                 // gate. The controller guards against re-fires on
                 // project switch.
                 repoCallout.recordLaunch()
+                openExternalFolders()
             }
+    }
+
+    private func openExternalFolders() {
+        for url in ExternalFolderRequests.consume() {
+            focusedPaneVM.newTab()
+            focusedPaneVM.activeTab.openExternalURL(url)
+        }
     }
 
     private var windowChrome: some View {
@@ -138,7 +161,7 @@ struct MainWindowView: View {
                 workspace: workspace,
                 updateManager: updateManager,
                 repoCallout: repoCallout,
-                cmux: cmux,
+                integrations: integrations,
                 selectedURL: $sidebarSelection,
                 // VM-memoized — see `FolderBrowserViewModel.tagSummaries`.
                 tagsSummary: focusedPane.tagSummaries,
@@ -188,7 +211,7 @@ struct MainWindowView: View {
         )
     }
 
-    /// Push the current snapshot into the workspace's active project.
+    /// Push the current snapshot into the project that owns this view.
     /// `WorkspaceManager` owns the debounce window and the disk write —
     /// this view just keeps the in-memory model current after every
     /// observable mutation.
@@ -199,16 +222,17 @@ struct MainWindowView: View {
     /// / `searchResults` / `renameDraft` churn does not), so without this most
     /// emissions would rebuild and re-push an identical `WindowState`. The
     /// snapshot itself is still built per emission — that's unavoidable while
-    /// the change signal is a bare `objectWillChange` — but the `updateActive`
+    /// the change signal is a bare `objectWillChange` — but the `updateProject`
     /// / `setFavorites` round-trip (which each schedule a 500 ms debounced disk
     /// write) only fires for the half that actually changed.
     @MainActor
     private func scheduleSave() {
         let state = snapshot()
         if state != lastScheduledState {
-            workspace.updateActive { $0.state = state }
+            workspace.updateProject(id: projectID) { $0.state = state }
             lastScheduledState = state
         }
+        guard workspace.workspace.activeProjectID == projectID else { return }
         // Favorites edit through the sidebar VM also feed in here so the
         // workspace's cross-project list stays in sync.
         let favorites = sidebar.favorites
@@ -223,8 +247,10 @@ struct MainWindowView: View {
     @MainActor
     private func saveSynchronously() {
         let state = snapshot()
-        workspace.updateActive { $0.state = state }
-        workspace.setFavorites(sidebar.favorites)
+        workspace.updateProject(id: projectID) { $0.state = state }
+        if workspace.workspace.activeProjectID == projectID {
+            workspace.setFavorites(sidebar.favorites)
+        }
         workspace.saveSynchronously()
     }
 
@@ -235,6 +261,14 @@ struct MainWindowView: View {
             // Spacer for traffic-light area on the left edge of the window.
             Spacer().frame(width: 64)
 
+            Button {
+                fileWork.isPresented.toggle()
+            } label: {
+                Image(systemName: "list.bullet.clipboard")
+            }
+            .help("File operations")
+            .accessibilityLabel("File operations")
+            .popover(isPresented: $fileWork.isPresented) { FileWorkPanel(center: fileWork) }
             ToolbarIconButton(symbol: "chevron.left", help: "Back (⌘[)") { focusedPane.goBack() }
                 .disabled(!focusedPane.canGoBack)
             ToolbarIconButton(symbol: "chevron.right", help: "Forward (⌘])") { focusedPane.goForward() }
@@ -247,7 +281,21 @@ struct MainWindowView: View {
             breadcrumb
 
             searchField
+            SearchOptionsMenu(model: focusedPane, workspace: workspace,
+                projectRoots: [pane0, pane1, pane2, pane3].flatMap { $0.tabs.compactMap(\.folderURL) })
 
+            Menu {
+                ForEach(0..<layout.paneCount, id: \.self) { index in
+                    if index != focusedPaneIndex, let other = paneVM(at: index).activeTab.folderURL,
+                       let current = focusedPane.folderURL {
+                        Button("Compare with Pane \(index + 1) — \(other.lastPathComponent)") {
+                            folderComparison = FolderComparisonRequest(left: current, right: other)
+                        }
+                    }
+                }
+            } label: { Image(systemName: "square.split.2x1") }
+            .help("Compare visible folders")
+            .disabled(layout.paneCount < 2 || focusedPane.folderURL == nil)
             layoutSegmentedControl
         }
         .padding(.horizontal, 12)
@@ -258,7 +306,7 @@ struct MainWindowView: View {
     private var breadcrumb: some View {
         HStack(spacing: 4) {
             if let url = focusedPane.folderURL {
-                let components = url.pathComponents.filter { $0 != "/" }
+                let components = Array(url.pathComponents.filter { $0 != "/" }.suffix(3))
                 if components.isEmpty {
                     Text("/").font(Theme.Font.breadcrumb).foregroundStyle(Theme.Color.label)
                 } else {
@@ -269,6 +317,7 @@ struct MainWindowView: View {
                                 .foregroundStyle(Theme.Color.labelTertiary)
                         }
                         Text(name)
+                            .layoutPriority(idx == components.count - 1 ? 1 : 0)
                             .font(Theme.Font.breadcrumb)
                             .foregroundStyle(idx == components.count - 1
                                              ? Theme.Color.label
@@ -325,9 +374,11 @@ struct MainWindowView: View {
         Divider()
         Button("Open in Terminal") { focusedPane.openCurrentFolderInTerminal() }
             .disabled(focusedPane.folderURL == nil)
-        if focusedPane.canOpenInCmux {
+        if workspace.workspace.settings.integrationProvider == .cmux, focusedPane.canOpenInCmux {
             Button("Open in cmux") { focusedPane.openCurrentFolderInCmux() }
                 .disabled(focusedPane.folderURL == nil)
+        } else if let app = WorkspaceIntegrationClient.applicationURL(for: workspace.workspace.settings.integrationProvider) {
+            Button("Open \(workspace.workspace.settings.integrationProvider.title)") { NSWorkspace.shared.open(app) }
         }
         Button("Open in Finder") { focusedPane.openCurrentFolderInFinder() }
             .disabled(focusedPane.folderURL == nil)
@@ -343,7 +394,7 @@ struct MainWindowView: View {
             get: { focusedPane.searchQuery },
             set: { focusedPane.searchQuery = $0 }
         )
-        let isEmpty = focusedPane.searchQuery.isEmpty
+        let isEmpty = !focusedPane.isFiltering
         let showField = searchActive || !isEmpty
 
         return Group {
@@ -359,8 +410,8 @@ struct MainWindowView: View {
                         .frame(maxWidth: .infinity)
                         .focused($searchFocused)
                         .onKeyPress(.escape) {
-                            if !focusedPane.searchQuery.isEmpty {
-                                focusedPane.searchQuery = ""
+                            if focusedPane.isFiltering {
+                                focusedPane.clearSearch()
                             } else {
                                 searchFocused = false
                                 searchActive = false
@@ -369,7 +420,7 @@ struct MainWindowView: View {
                         }
                     if !isEmpty {
                         Button {
-                            focusedPane.searchQuery = ""
+                            focusedPane.clearSearch()
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 10))
@@ -490,6 +541,16 @@ struct MainWindowView: View {
                 Divider().background(Theme.Color.separator)
                 paneView(1)
             }
+        case .three:
+            HStack(spacing: 0) {
+                paneView(0)
+                Divider().background(Theme.Color.separator)
+                VStack(spacing: 0) {
+                    paneView(1)
+                    Divider().background(Theme.Color.separator)
+                    paneView(2)
+                }
+            }
         case .four:
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
@@ -550,6 +611,10 @@ struct MainWindowView: View {
 
             Spacer()
 
+            if focusedPane.searchReadErrors > 0 {
+                Text("Search incomplete: \(focusedPane.searchReadErrors) read error(s)")
+                    .foregroundStyle(.orange)
+            }
             if focusedPane.includeHidden {
                 Text("Hidden visible").foregroundStyle(Theme.Color.labelSecondary)
                 Text("·").foregroundStyle(Theme.Color.labelTertiary)
@@ -641,11 +706,11 @@ private struct SaveTriggers: ViewModifier {
                 scheduleSave()
             }
             .onChange(of: focusedPaneIndex) { _, _ in scheduleSave() }
-            .onReceive(pane0.objectWillChange) { _ in scheduleSave() }
-            .onReceive(pane1.objectWillChange) { _ in scheduleSave() }
-            .onReceive(pane2.objectWillChange) { _ in scheduleSave() }
-            .onReceive(pane3.objectWillChange) { _ in scheduleSave() }
-            .onReceive(sidebar.objectWillChange) { _ in scheduleSave() }
+            .onReceive(pane0.objectWillChange.persistedChanges) { _ in scheduleSave() }
+            .onReceive(pane1.objectWillChange.persistedChanges) { _ in scheduleSave() }
+            .onReceive(pane2.objectWillChange.persistedChanges) { _ in scheduleSave() }
+            .onReceive(pane3.objectWillChange.persistedChanges) { _ in scheduleSave() }
+            .onReceive(sidebar.objectWillChange.persistedChanges) { _ in scheduleSave() }
     }
 }
 
@@ -828,9 +893,14 @@ private struct GlobalNotifications: ViewModifier {
             // FSEvents lands in M3 per plan §3 — until then drag/drop posts
             // an explicit "I changed the filesystem" notification and every
             // open tab in every pane refetches its folder.
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirFileSystemChanged)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirFileSystemChanged)) { notification in
+                let folders = FileSystemChange.folders(in: notification)
                 for paneVM in allPanes {
-                    for tab in paneVM.tabs { tab.reload() }
+                    for tab in paneVM.tabs where tab.searchRoots.contains(where: {
+                        FileChangeScope.affects(root: $0, changedFolders: folders, recursive: tab.isFiltering || tab.viewMode == .tree)
+                    }) {
+                        tab.reload()
+                    }
                 }
             }
             // Synchronous save on app termination (debounce would be cancelled

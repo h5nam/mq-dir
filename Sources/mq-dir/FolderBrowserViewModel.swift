@@ -93,14 +93,67 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             // Mutual exclusion: activating a tag filter clears any live
             // search. Guarded on non-nil so clearing the filter doesn't wipe
             // a query, and so this never recurses with the searchQuery setter.
-            if tagFilter != nil, !searchQuery.isEmpty { searchQuery = "" }
+            if tagFilter != nil {
+                projectSearchRoots = nil
+                projectSearchWatchers.removeAll()
+                searchFilter = .init()
+                searchQuery = ""
+            }
         }
     }
+    @Published var searchFilter = FileSearchFilter() {
+        didSet {
+            guard oldValue != searchFilter else { return }
+            if searchFilter.isActive { tagFilter = nil }
+            scheduleSearch()
+        }
+    }
+    @Published private(set) var searchReadErrors = 0
+    private(set) var projectSearchRoots: [URL]?
+    private var projectSearchWatchers: [DirectoryWatcher] = []
+    private var searchEntriesByID: [FileEntry.ID: FileEntry] = [:]
+
+    func clearSearch() {
+        projectSearchRoots = nil
+        projectSearchWatchers.removeAll()
+        searchFilter = .init()
+        searchQuery = ""
+    }
+
+    func applySearch(_ search: SavedFileSearch, projectRoots: [URL]) {
+        let roots = Self.minimalSearchRoots(projectRoots)
+        if search.projectScope, folderURL == nil, let first = roots.first { openFolder(first) }
+        projectSearchRoots = search.projectScope ? roots : nil
+        projectSearchWatchers.removeAll()
+        if watchesDirectories {
+            projectSearchWatchers = (projectSearchRoots ?? []).filter { $0 != folderURL }.map { url in
+                DirectoryWatcher(url: url) { [weak self] in
+                    Task { @MainActor [weak self] in self?.reload() }
+                }
+            }
+        }
+        searchFilter = search.filter
+        searchQuery = search.query
+    }
+
+    static func minimalSearchRoots(_ urls: [URL]) -> [URL] {
+        var roots: [URL] = []
+        for url in urls {
+            let parts = url.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+            if roots.contains(where: { parts.starts(with: $0.resolvingSymlinksInPath().standardizedFileURL.pathComponents) }) { continue }
+            roots.removeAll { $0.resolvingSymlinksInPath().standardizedFileURL.pathComponents.starts(with: parts) }
+            roots.append(url)
+        }
+        return roots
+    }
+
+    var searchRoots: [URL] { projectSearchRoots ?? [folderURL].compactMap { $0 } }
+
     /// Recursive matches for the active `searchQuery`. Empty when not
     /// filtering, or while the first results of a fresh query are still
     /// being gathered.
     @Published private(set) var searchResults: [FileEntry] = [] {
-        didSet { invalidateRowCaches() }
+        didSet { invalidateRowCaches(); cachedSelectedSize = nil }
     }
     /// True between a non-empty `searchQuery` arriving and the resulting
     /// recursive walk completing. Drives the spinner / "Searching…" hint.
@@ -146,6 +199,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     @Published var viewMode: PaneViewMode = .list
     /// Whether the right-side preview panel is shown for this tab.
     @Published var previewVisible: Bool = false
+    @Published var listScrollID: URL?
+    @Published var treeScrollID: URL?
+    private var pendingListScrollPath: String?
+    private var pendingTreeScrollPath: String?
     /// Set of expanded directory paths in tree mode. Stored as paths so
     /// it survives serialization without bookmark plumbing — losing access
     /// to a path just collapses that node, never breaks the view.
@@ -210,7 +267,25 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
 
+    typealias DirectoryLoader = @Sendable (URL, Bool, @Sendable () -> Bool) throws -> [FileEntry]
+    private var directoryLoader: DirectoryLoader = { url, hidden, cancelled in
+        try FileSystemService().enumerateDirectory(at: url, includingHidden: hidden, isCancelled: cancelled)
+    }
+    private let treeQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "mqdir.tree-loads"
+        queue.maxConcurrentOperationCount = 2
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+    private var treeLoadTokens: [String: ProcessRunner.Cancellation] = [:]
+    @Published private(set) var loadingTreePaths: Set<String> = []
+    @Published private(set) var treeLoadErrors: [String: String] = [:]
+    private var pendingTreeReveal: FileEntry.ID?
+
     private var loadTask: Task<Void, Never>?
+    private var loadCancelToken: ProcessRunner.Cancellation?
+    private var sizeCancelToken: ProcessRunner.Cancellation?
     private var searchTask: Task<Void, Never>?
     /// Token handed to the in-flight enumerator so we can stop it early when
     /// a newer query supersedes it. Detached tasks don't inherit cancellation,
@@ -222,10 +297,14 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// the underlying stream, so dropping the reference is enough to
     /// tear it down. ARC handles the final release on VM deinit.
     private var directoryWatcher: DirectoryWatcher?
+    private var watchesDirectories = true
 
     /// Default initializer — fresh, empty pane (used by previews and the
     /// first launch when no persisted state exists).
-    init() {}
+    init(watchingDirectories: Bool = true, directoryLoader: DirectoryLoader? = nil) {
+        watchesDirectories = watchingDirectories
+        if let directoryLoader { self.directoryLoader = directoryLoader }
+    }
 
     /// Restoration initializer — rehydrates a tab from a saved `TabState`.
     /// If the bookmark resolves, opens the folder and queues the saved
@@ -240,10 +319,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         self.viewMode = state.viewMode
         self.expandedPaths = Set(state.expandedPaths)
         self.previewVisible = state.previewVisible
+        self.pendingListScrollPath = state.listScrollPath
+        self.pendingTreeScrollPath = state.treeScrollPath
 
         if let bookmark = state.folderBookmark,
            let resolved = PersistenceService.resolveBookmark(bookmark) {
             self.currentBookmark = bookmark
+            self.pendingListScrollPath = state.listScrollPath.flatMap { FileSystemService.restoredPath($0, under: resolved) }
+            self.pendingTreeScrollPath = state.treeScrollPath.flatMap { FileSystemService.restoredPath($0, under: resolved) }
+            self.expandedPaths = Set(state.expandedPaths.compactMap { FileSystemService.restoredPath($0, under: resolved) })
+            self.pendingRestoredSelection = state.selectedURLPaths.compactMap { FileSystemService.restoredPath($0, under: resolved) }
             // Sandbox-readiness: claim security scope before any I/O.
             if resolved.startAccessingSecurityScopedResource() {
                 self.hasSecurityScopeAccess = true
@@ -252,27 +337,18 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             self.folderURL = resolved
             reload()
             updateDirectoryWatcher()
-            // Pre-warm any expanded subtrees so the tree view settles onto
-            // its real rows quickly — but OFF the synchronous init path. Each
-            // `loadChildren` is a blocking directory enumeration; running N of
-            // them inline here stalled the very first window paint by however
-            // long the deepest restored tree took to walk. Deferring to a
-            // post-render `Task` lets the window come up immediately; the tree
-            // renders the root via `TreeFileListView`'s `entries` fallback and
-            // fills expanded subfolders in as this hydration lands (each
-            // `treeChildren` assignment re-renders the affected rows).
-            let pathsToWarm = expandedPaths
-            if !pathsToWarm.isEmpty {
-                Task { @MainActor [weak self] in
-                    for path in pathsToWarm {
-                        self?.loadChildren(for: URL(fileURLWithPath: path))
-                    }
-                }
-            }
+            // reload() schedules expanded children after the root is ready.
+
         }
     }
 
     deinit {
+        loadCancelToken?.cancel()
+        sizeCancelToken?.cancel()
+        searchCancelToken?.cancel()
+        loadTask?.cancel()
+        searchTask?.cancel()
+        for token in treeLoadTokens.values { token.cancel() }
         // Balance any outstanding security-scope claim. `scopedURL` is the
         // nonisolated mirror — deinit can't touch main-actor state, so we
         // only release through this side-channel pointer.
@@ -293,7 +369,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             viewMode: viewMode,
             expandedPaths: Array(expandedPaths),
             previewVisible: previewVisible,
-            foldersOnTop: foldersOnTop
+            foldersOnTop: foldersOnTop,
+            listScrollPath: listScrollID?.path ?? pendingListScrollPath,
+            treeScrollPath: treeScrollID?.path ?? pendingTreeScrollPath
         )
     }
 
@@ -327,6 +405,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// unrelated collapse doesn't dirty the cache.
     private func evictCachedSubtree(under path: String) {
         let descendantPrefix = path + "/"
+        for key in treeLoadTokens.keys.filter({ $0 == path || $0.hasPrefix(descendantPrefix) }) {
+            treeLoadTokens.removeValue(forKey: key)?.cancel()
+            loadingTreePaths.remove(key)
+        }
+        treeLoadErrors = treeLoadErrors.filter { $0.key != path && !$0.key.hasPrefix(descendantPrefix) }
         let doomed = treeChildren.keys.filter {
             $0 == path || $0.hasPrefix(descendantPrefix)
         }
@@ -390,20 +473,73 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
 
         replaceSelection(entry.id)
-        pendingRevealTarget = entry.id
+        pendingTreeReveal = entry.id
+        publishTreeRevealIfReady()
     }
 
-    /// Synchronous child enumeration. The tree typically lazy-loads only
-    /// the folders the user touches, so blocking the main actor briefly
-    /// here is fine; the call is bounded by one directory's worth of
-    /// entries. If a folder ever proves slow we can move this to a Task.
+    /// Two background workers per tab; collapse/reload cancels requests and
+    /// a token identity prevents old results from repopulating a new tree.
     private func loadChildren(for url: URL) {
-        guard let entries = try? FileSystemService()
-            .enumerateDirectory(at: url, includingHidden: includeHidden)
-        else { return }
-        treeChildren[url.path] = FileEntrySorter.sorted(
-            entries, by: sortKey, ascending: sortAscending, foldersOnTop: foldersOnTop
-        )
+        let path = url.path
+        guard treeLoadTokens[path] == nil, let currentRoot = folderURL,
+              url.standardizedFileURL.pathComponents.count > currentRoot.standardizedFileURL.pathComponents.count,
+              url.standardizedFileURL.pathComponents.starts(with: currentRoot.standardizedFileURL.pathComponents),
+              FileSystemService.ancestorFolders(from: currentRoot, to: url)
+                .allSatisfy({ expandedPaths.contains($0.path) }) else { return }
+        let token = ProcessRunner.Cancellation()
+        treeLoadTokens[path] = token
+        loadingTreePaths.insert(path)
+        treeLoadErrors[path] = nil
+        let root = folderURL
+        let hidden = includeHidden
+        let loader = directoryLoader
+        let queue = treeQueue
+        Task { [weak self] in
+            let result: Result<[FileEntry], Error> = await withCheckedContinuation { continuation in
+                queue.addOperation {
+                    continuation.resume(returning: Result {
+                        if token.isCancelled { throw CancellationError() }
+                        return try loader(url, hidden, { token.isCancelled })
+                    })
+                }
+            }
+            guard let self, !token.isCancelled, self.folderURL == root,
+                  self.treeLoadTokens[path] === token, self.expandedPaths.contains(path) else { return }
+            self.treeLoadTokens[path] = nil
+            self.loadingTreePaths.remove(path)
+            switch result {
+            case .success(let entries):
+                self.treeChildren[path] = FileEntrySorter.sorted(entries, by: self.sortKey,
+                    ascending: self.sortAscending, foldersOnTop: self.foldersOnTop)
+            case .failure(let error):
+                self.treeLoadErrors[path] = error.localizedDescription
+            }
+            self.publishTreeRevealIfReady()
+            self.restoreTreeSelectionIfReady()
+        }
+    }
+
+    func retryTreeChildren(_ url: URL) {
+        guard expandedPaths.contains(url.path) else { return }
+        loadChildren(for: url)
+    }
+
+    private func restoreTreeSelectionIfReady() {
+        guard loadingTreePaths.isEmpty, viewMode == .tree, searchQuery.isEmpty else { return }
+        if let path = pendingTreeScrollPath {
+            treeScrollID = entriesByID.values.first(where: { $0.url.path == path })?.id
+            pendingTreeScrollPath = nil
+        }
+        let savedPaths = Set(pendingRestoredSelection)
+        selection.formUnion(entriesByID.values.filter { savedPaths.contains($0.url.path) }.map(\.id))
+        pendingRestoredSelection = []
+        selection.formIntersection(Set(entriesByID.keys))
+    }
+
+    private func publishTreeRevealIfReady() {
+        guard let target = pendingTreeReveal, visibleTreeEntries.contains(where: { $0.id == target }) else { return }
+        pendingTreeReveal = nil
+        pendingRevealTarget = target
     }
 
     /// Discard cached subtree contents so a fresh `reload()` of the root
@@ -412,6 +548,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// requiring the user to toggle them again.
     func refreshTreeChildren() {
         let stillExpanded = expandedPaths
+        for token in treeLoadTokens.values { token.cancel() }
+        treeLoadTokens.removeAll()
+        loadingTreePaths.removeAll()
+        treeLoadErrors.removeAll()
         treeChildren.removeAll()
         // `removeAll()` drops the root entry the `entries` didSet just set;
         // restore it so tree mode keeps a fresh root listing after a reload.
@@ -421,6 +561,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         for path in stillExpanded {
             loadChildren(for: URL(fileURLWithPath: path))
         }
+        restoreTreeSelectionIfReady()
     }
 
     var selectedEntry: FileEntry? {
@@ -474,7 +615,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// (rename, etc.) needs this wider search to avoid silently
     /// no-op'ing in tree mode.
     func findEntry(id: FileEntry.ID) -> FileEntry? {
-        entriesByID[id]
+        if isFiltering, let entry = searchEntriesByID[id] { return entry }
+        return entriesByID[id]
     }
 
     private func rebuildEntriesIndex() {
@@ -562,7 +704,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     var isFiltering: Bool {
-        !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty || searchFilter.isActive
     }
 
     var folderDisplayPath: String {
@@ -589,6 +731,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// and clearing the forward stack. This is the user-initiated path. The
     /// security-scoped bookmark refresh and scope re-acquisition happen in the
     /// shared `navigate(to:)` so back/forward navigation gets them too.
+    func openExternalURL(_ url: URL) {
+        let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        navigate(to: directory ? url : url.deletingLastPathComponent(), restoring: directory ? [] : [url.path])
+    }
+
     func openFolder(_ url: URL) {
         if let current = folderURL, current != url, let frame = currentFrame() {
             backStack.append(frame)
@@ -665,7 +812,14 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             scopedURL = scoped
         }
         folderURL = url
+        listScrollID = nil
+        treeScrollID = nil
+        pendingListScrollPath = nil
+        pendingTreeScrollPath = nil
         selection.removeAll()
+        projectSearchRoots = nil
+        projectSearchWatchers.removeAll()
+        searchFilter = .init()
         // Drop the per-folder filters so a query / tag filter applied in the
         // previous folder doesn't bleed into the new listing (matches Finder).
         searchQuery = ""
@@ -684,7 +838,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     private func updateDirectoryWatcher() {
         directoryWatcher?.stop()
         directoryWatcher = nil
-        guard let url = folderURL else { return }
+        guard watchesDirectories, let url = folderURL else { return }
         directoryWatcher = DirectoryWatcher(url: url) { [weak self] in
             Task { @MainActor [weak self] in
                 self?.reload()
@@ -697,13 +851,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// current folder recursively, collecting entries whose name matches
     /// the query case-insensitively. Empty queries reset the result set
     /// and never schedule a walk.
-    private func scheduleSearch() {
+    private func scheduleSearch(preserveSelection: Bool = false) {
+        if !preserveSelection { selection.removeAll() }
         searchTask?.cancel()
         searchCancelToken?.cancel()
 
         let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, let root = folderURL else {
+        let roots = searchRoots
+        guard (!trimmed.isEmpty || searchFilter.isActive), !roots.isEmpty else {
+            searchEntriesByID.removeAll()
             searchResults = []
+            searchReadErrors = 0
             isSearching = false
             // Drop the just-cancelled token's identity so a stale deferred
             // block (which guards on `searchCancelToken === token`) can't
@@ -714,9 +872,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
         let token = SearchCancelToken()
         searchCancelToken = token
+        searchEntriesByID.removeAll()
+        searchResults = []
+        searchReadErrors = 0
         isSearching = true
 
+        let filter = searchFilter
+        let diagnostics = FileSearchDiagnostics()
         let includeHidden = includeHidden
+        let initialSortKey = sortKey
+        let initialAscending = sortAscending
+        let initialFoldersOnTop = foldersOnTop
 
         searchTask = Task { [weak self] in
             // Always clear the spinner on the way out, even if we get
@@ -733,23 +899,52 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             try? await Task.sleep(for: .milliseconds(220))
             if Task.isCancelled || token.isCancelled { return }
 
-            let results = await Task.detached(priority: .userInitiated) {
-                (try? FileSystemService().enumerateMatching(
-                    root: root,
-                    query: trimmed,
-                    includingHidden: includeHidden,
-                    isCancelled: { token.isCancelled }
-                )) ?? []
+            let results = await Task.detached(priority: .userInitiated) { [weak self] in
+                var all: [FileEntry] = []
+                for root in roots {
+                    if token.isCancelled { break }
+                    let prefix = all
+                    let found = (try? FileSystemService().enumerateMatching(root: root, query: trimmed,
+                        includingHidden: includeHidden, isCancelled: { token.isCancelled },
+                        onProgress: { [weak self] partial in
+                            let sorted = FileEntrySorter.sorted(prefix + partial, by: initialSortKey,
+                                ascending: initialAscending, foldersOnTop: initialFoldersOnTop)
+                            let index = Dictionary(sorted.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+                            Task { @MainActor [weak self] in
+                                guard let self, self.searchCancelToken === token, !token.isCancelled,
+                                      self.isSearching, sorted.count > self.searchResults.count,
+                                      self.sortKey == initialSortKey, self.sortAscending == initialAscending,
+                                      self.foldersOnTop == initialFoldersOnTop else { return }
+                                self.searchEntriesByID = index
+                                self.searchResults = sorted
+                            }
+                        }, filter: filter, diagnostics: diagnostics)) ?? []
+                    all.append(contentsOf: found)
+                }
+                return all
             }.value
 
             if Task.isCancelled || token.isCancelled { return }
             guard let self else { return }
-            self.searchResults = FileEntrySorter.sorted(
-                results,
-                by: self.sortKey,
-                ascending: self.sortAscending,
-                foldersOnTop: self.foldersOnTop
-            )
+            while !token.isCancelled {
+                let key = self.sortKey
+                let ascending = self.sortAscending
+                let foldersFirst = self.foldersOnTop
+                let (sorted, index) = await Task.detached(priority: .userInitiated) {
+                    let sorted = FileEntrySorter.sorted(results, by: key, ascending: ascending, foldersOnTop: foldersFirst)
+                    let index = Dictionary(sorted.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+                    return (sorted, index)
+                }.value
+                guard !Task.isCancelled, !token.isCancelled else { return }
+                if self.sortKey == key, self.sortAscending == ascending, self.foldersOnTop == foldersFirst {
+                    self.searchEntriesByID = index
+                    self.searchResults = sorted
+                    self.searchReadErrors = diagnostics.errorCount
+                    break
+                }
+            }
+            let visibleIDs = Set(self.searchResults.map(\.id))
+            self.selection.formIntersection(visibleIDs)
         }
     }
 
@@ -759,6 +954,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
 
         loadTask?.cancel()
+        loadCancelToken?.cancel()
+        for token in treeLoadTokens.values { token.cancel() }
+        treeLoadTokens.removeAll()
+        loadingTreePaths.removeAll()
+        let loadToken = ProcessRunner.Cancellation()
+        loadCancelToken = loadToken
+        sizeCancelToken?.cancel()
+        // Disk/hidden-file changes invalidate an active recursive query too.
+        scheduleSearch(preserveSelection: true)
         isLoading = true
         errorMessage = nil
         // Invalidate computed directory sizes on every reload (navigation and
@@ -773,20 +977,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         if !computingSizeIDs.isEmpty { computingSizeIDs = [] }
 
         let includeHidden = includeHidden
-        let sortKey = sortKey
-        let sortAscending = sortAscending
-        let foldersOnTop = foldersOnTop
 
-        loadTask = Task {
+        let loader = directoryLoader
+        loadTask = Task { [weak self] in
             do {
                 let loadedEntries = try await Task.detached(priority: .userInitiated) {
-                    try FileSystemService().enumerateDirectory(
-                        at: folderURL,
-                        includingHidden: includeHidden
-                    )
+                    try loader(folderURL, includeHidden, { loadToken.isCancelled })
                 }.value
 
-                guard !Task.isCancelled else {
+                guard let self, !Task.isCancelled else {
                     return
                 }
 
@@ -796,6 +995,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                     ascending: sortAscending,
                     foldersOnTop: foldersOnTop
                 )
+                if let path = pendingListScrollPath {
+                    listScrollID = entries.first(where: { $0.url.path == path })?.id
+                    pendingListScrollPath = nil
+                }
                 // Restore selection from a persisted PaneState if any —
                 // intersect saved paths with the freshly enumerated entries
                 // so deleted/moved files don't leave dangling IDs.
@@ -806,11 +1009,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                     )
                     selectionAnchor = selection.first
                     selectionCursor = selection.first
-                    pendingRestoredSelection = []
-                } else {
-                    selection = selection.filter { selectedID in
-                        entries.contains { $0.id == selectedID }
-                    }
+                    if viewMode != .tree { pendingRestoredSelection = [] }
+                } else if searchQuery.isEmpty, viewMode != .tree {
+                    selection.formIntersection(Set(entries.map(\.id)))
                 }
                 // A reload can fire mid-rename (e.g. another app touches the
                 // folder and the watcher reloads us). `renamingEntryID` is
@@ -828,7 +1029,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                 // the same on-disk state the flat list just refreshed against.
                 refreshTreeChildren()
             } catch {
-                guard !Task.isCancelled else {
+                guard let self, !Task.isCancelled else {
                     return
                 }
 
@@ -1155,7 +1356,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
     /// Pasteboard type that marks a cut operation. Empty data — only
     /// the type's presence matters.
-    static let cutMarkerType = NSPasteboard.PasteboardType("com.mqdir.cut.urls")
+    static let cutMarkerType = CutPasteboard.markerType
 
     /// Read file URLs off the system pasteboard and copy (or move,
     /// when the pasteboard carries our cut marker) them into the
@@ -1165,41 +1366,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func pasteFromPasteboard(normalizeHangul: Bool = false) {
         guard let folder = folderURL else { return }
         let pb = NSPasteboard.general
-        guard let items = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
-              !items.isEmpty
-        else { return }
-
-        // Read the cut marker on the main actor *before* detaching — the
-        // pasteboard is main-actor state, and the detached loop only needs
-        // the resolved `isCut` flag plus the URLs.
+        guard let sources = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !sources.isEmpty else { return }
         let isCut = pb.types?.contains(Self.cutMarkerType) == true
-        Task {
-            let failures = await Task.detached(priority: .userInitiated) {
-                // Same standardized self-drop + descendant guards drop
-                // uses, so paste-into-same-folder and paste-into-descendant
-                // behave identically to a drag-drop.
-                FileOperationService.transfer(items, into: folder, move: isCut, normalizeHangul: normalizeHangul)
-            }.value
-            for (source, error) in failures {
-                FileHandle.standardError.write(
-                    Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                )
-            }
-            // After a cut+paste the source URLs are gone, so wipe the
-            // pasteboard to avoid a follow-up paste silently failing on
-            // missing files. Plain-copy paste leaves the clipboard alone
-            // so the user can paste the same set into multiple folders.
-            // Back on the main actor here (NSPasteboard is main-actor state).
-            if isCut {
-                pb.clearContents()
-            }
-            // Tell every other pane/tab to refresh — the source folder
-            // (potentially open in another pane after a cross-pane
-            // cut+paste) and any pane viewing the destination both need
-            // to drop the stale entries / pick up the new ones. The
-            // broadcast reloads this pane too, so we don't reload directly.
-            // Same pattern moveToTrash / acceptDrop / duplicate use.
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+        var revision = pb.changeCount
+        let request = FileWorkRequest(kind: isCut ? .move : .copy, sources: sources,
+            destination: folder, normalizeHangul: normalizeHangul)
+        FileWorkCenter.shared.submit(request) { outcomes in
+            guard isCut, pb.changeCount == revision else { return }
+            let remaining = outcomes.filter { $0.status != .succeeded }.flatMap(\.sources)
+            CutPasteboard.complete(pb, changeCount: revision, remainingURLs: remaining)
+            revision = pb.changeCount
         }
     }
 
@@ -1233,28 +1409,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        Task {
-            let failures: [(URL, String)] = await Task.detached(priority: .userInitiated) {
-                FileOperationService.permanentlyDelete(urls)
-                    .map { ($0.0, $0.1.localizedDescription) }
-            }.value
-
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
-
-            if !failures.isEmpty {
-                let report = NSAlert()
-                report.alertStyle = .warning
-                report.messageText = failures.count == 1
-                    ? "Couldn't delete \u{201C}\(failures[0].0.lastPathComponent)\u{201D}"
-                    : "Couldn't delete \(failures.count) items"
-                report.informativeText = failures
-                    .prefix(8)
-                    .map { "• \($0.0.lastPathComponent): \($0.1)" }
-                    .joined(separator: "\n")
-                report.addButton(withTitle: "OK")
-                report.runModal()
-            }
-        }
+        FileWorkCenter.shared.submit(FileWorkRequest(kind: .delete, sources: urls))
     }
 
     /// Selection wrapper for `permanentlyDelete(_:)` so the Edit menu
@@ -1274,50 +1429,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Cross-folder selections are rejected because zip's relative
     /// pathing assumes a single working directory.
     func compress(_ entries: [FileEntry]) {
-        guard !entries.isEmpty else { return }
-        let plan: (parent: URL, destination: URL, sourceNames: [String])?
-        do {
-            plan = try FileOperationService.planCompression(
-                urls: entries.map { (url: $0.url, isDirectory: $0.isDirectory) }
-            )
-        } catch FileOperationService.CompressError.crossFolder {
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "Can't compress items from different folders"
-            alert.informativeText = "Select items from one folder to compress them together."
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-            return
-        } catch {
-            return
-        }
-        guard let (parent, destination, sourceNames) = plan else { return }
-
-        Task {
-            let failure: String? = await Task.detached(priority: .utility) {
-                do {
-                    try FileOperationService.runCompression(
-                        parent: parent,
-                        sources: sourceNames,
-                        destination: destination
-                    )
-                    return nil
-                } catch {
-                    return error.localizedDescription
-                }
-            }.value
-
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
-
-            if let failure {
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = "Couldn't compress \u{201C}\(destination.lastPathComponent)\u{201D}"
-                alert.informativeText = failure
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-        }
+        FileWorkCenter.shared.submit(FileWorkRequest(kind: .compress, sources: entries.map(\.url)))
     }
 
     /// True when every entry in `entries` is an archive we know how
@@ -1340,42 +1452,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// open pane on the same folder picks up the new directory, and
     /// surfaces a single NSAlert with the archives that failed.
     func extractArchives(_ entries: [FileEntry]) {
-        let archives: [(URL, FileOperationService.ArchiveKind)] = entries.compactMap { entry in
-            guard !entry.isDirectory,
-                  let kind = FileOperationService.archiveKind(for: entry.url) else { return nil }
-            return (entry.url, kind)
-        }
-        guard !archives.isEmpty else { return }
-
-        Task {
-            let failures: [(URL, String)] = await Task.detached(priority: .utility) {
-                var failed: [(URL, String)] = []
-                for (url, kind) in archives {
-                    do {
-                        try FileOperationService.extract(archive: url, kind: kind)
-                    } catch {
-                        failed.append((url, error.localizedDescription))
-                    }
-                }
-                return failed
-            }.value
-
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
-
-            if !failures.isEmpty {
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = failures.count == 1
-                    ? "Couldn't extract \u{201C}\(failures[0].0.lastPathComponent)\u{201D}"
-                    : "Couldn't extract \(failures.count) archives"
-                alert.informativeText = failures
-                    .prefix(8)
-                    .map { "• \($0.0.lastPathComponent): \($0.1)" }
-                    .joined(separator: "\n")
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-        }
+        let sources = entries.filter { !$0.isDirectory && FileOperationService.archiveKind(for: $0.url) != nil }.map(\.url)
+        FileWorkCenter.shared.submit(FileWorkRequest(kind: .extract, sources: sources))
     }
 
     /// True when `entries` contains at least one directory — gates the
@@ -1399,19 +1477,24 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func calculateSize(_ entries: [FileEntry]) {
         let directories = entries.filter(\.isDirectory)
         guard !directories.isEmpty else { return }
+        sizeCancelToken?.cancel()
+        let token = ProcessRunner.Cancellation()
+        sizeCancelToken = token
+        sizeWalkGeneration &+= 1
         let generation = sizeWalkGeneration
-        for directory in directories {
-            let id = directory.id
-            guard !computingSizeIDs.contains(id) else { continue }
-            computingSizeIDs.insert(id)
-            let url = directory.url
-            Task { [weak self] in
+        computingSizeIDs = Set(directories.map(\.id))
+        Task { [weak self] in
+            // One size walk at a time per request instead of one detached
+            // task per selected folder. Superseded requests stop cooperatively.
+            for directory in directories {
+                if token.isCancelled { break }
+                let url = directory.url
                 let size = await Task.detached(priority: .utility) {
-                    FileSystemService().directorySize(at: url)
+                    FileSystemService().directorySize(at: url, isCancelled: { token.isCancelled })
                 }.value
-                guard let self, self.sizeWalkGeneration == generation else { return }
-                self.computedDirectorySizes[id] = size
-                self.computingSizeIDs.remove(id)
+                guard let self, !token.isCancelled, self.sizeWalkGeneration == generation else { return }
+                self.computedDirectorySizes[directory.id] = size
+                self.computingSizeIDs.remove(directory.id)
             }
         }
     }
@@ -1482,18 +1565,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// + system-wide reload pattern so an open second pane viewing the same
     /// folder also picks up the new copies.
     func duplicate(_ entries: [FileEntry], normalizeHangul: Bool = false) {
-        let urls = entries.map(\.url)
-        Task {
-            let failures = await Task.detached(priority: .userInitiated) {
-                FileOperationService.duplicate(urls, normalizeHangul: normalizeHangul)
-            }.value
-            for (source, error) in failures {
-                FileHandle.standardError.write(
-                    Data("[mq-dir duplicate] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                )
-            }
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
-        }
+        FileWorkCenter.shared.submit(FileWorkRequest(kind: .duplicate, sources: entries.map(\.url), normalizeHangul: normalizeHangul))
     }
 
     /// Begin inline rename for `entry`. Seeds the draft with the
@@ -1551,20 +1623,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != entry.name else { return }
 
-        do {
-            let newURL = try FileOperationService.rename(entry.url, to: trimmed)
-            // FileEntry.ID is the URL, so the renamed row gets a brand-new ID
-            // after the fs-changed reload. Migrate the selection / anchor /
-            // cursor from the old ID to the new URL *now* so the renamed row
-            // stays selected — and so it sticks even if the file watcher's
-            // reload races `reload()` below (the set already holds the new URL).
-            migrateSelection(from: entry.id, to: newURL)
-            reload()
-        } catch FileOperationService.RenameError.destinationExists(let name) {
-            errorMessage = "An item named '\(name)' already exists in this folder."
-        } catch {
-            errorMessage = "Couldn't rename: \(error.localizedDescription)"
+        FileWorkCenter.shared.submit(FileWorkRequest(kind: .rename, sources: [entry.url], newName: trimmed)) { [weak self] outcomes in
+            guard let self, let outcome = outcomes.first, outcome.status == .succeeded, let newURL = outcome.destination else { return }
+            self.migrateSelection(from: entry.id, to: newURL)
         }
+
     }
 
     /// Discard the in-progress rename without touching the filesystem.
@@ -1621,23 +1684,14 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                     }
                 }
             }.value
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+            FileSystemChange.post(folders: urls.map { $0.deletingLastPathComponent() })
         }
     }
 
+
+
     func moveToTrash(_ entries: [FileEntry]) {
-        let urls = entries.map(\.url)
-        Task {
-            let failures = await Task.detached(priority: .userInitiated) {
-                FileOperationService.moveToTrash(urls)
-            }.value
-            for (url, error) in failures {
-                FileHandle.standardError.write(
-                    Data("[mq-dir trash] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                )
-            }
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
-        }
+        FileWorkCenter.shared.submit(FileWorkRequest(kind: .trash, sources: entries.map(\.url)))
     }
 
     /// Move (or copy across volumes) a list of file URLs into a destination folder.
@@ -1645,17 +1699,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// cross-volume = copy. On name conflict, the destination gets " 2", " 3", ... suffix
     /// (Finder convention). After completion, broadcasts a system-wide reload.
     func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool, normalizeHangul: Bool = false) {
-        Task {
-            let failures = await Task.detached(priority: .userInitiated) {
-                FileOperationService.transfer(urls, into: destinationFolder, move: !copy, normalizeHangul: normalizeHangul)
-            }.value
-            for (source, error) in failures {
-                FileHandle.standardError.write(
-                    Data("[mq-dir drop] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                )
-            }
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
-        }
+        FileWorkCenter.shared.submit(FileWorkRequest(kind: .drop, sources: urls,
+            destination: destinationFolder, forceCopy: copy, normalizeHangul: normalizeHangul))
     }
 }
 

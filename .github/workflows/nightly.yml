@@ -27,12 +27,13 @@ jobs:
           xcodegen --version
 
       - name: Generate project
-        run: xcodegen generate
+        run: Scripts/generate-project.sh
 
       - name: Build ad-hoc signed app
         run: |
           xcodebuild \
             -project mq-dir.xcodeproj \
+            -onlyUsePackageVersionsFromResolvedFile \
             -scheme mq-dir \
             -configuration Release \
             -derivedDataPath build/DerivedData \

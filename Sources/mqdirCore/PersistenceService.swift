@@ -1,5 +1,29 @@
 import Foundation
 
+/// Per-load recovery evidence; never shared between decoder invocations.
+private final class StateDecodingRecovery: @unchecked Sendable {
+    static let key = CodingUserInfoKey(rawValue: "mqdir.stateRecovery")!
+    // JSONDecoder.userInfo requires Sendable values. Protect the only mutable
+    // field even though each decoder currently performs its work serially.
+    private let lock = NSLock()
+    private var didRepair = false
+    var repaired: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didRepair
+    }
+
+    private func markRepaired() {
+        lock.lock()
+        defer { lock.unlock() }
+        didRepair = true
+    }
+
+    static func record(in decoder: Decoder) {
+        (decoder.userInfo[key] as? StateDecodingRecovery)?.markRepaired()
+    }
+}
+
 extension KeyedDecodingContainer {
     /// Decode `key` if present and well-formed, otherwise fall back to
     /// `defaultValue`. Collapses the repeated
@@ -29,6 +53,32 @@ extension KeyedDecodingContainer {
                 // The element threw — advance the cursor past it so the loop
                 // terminates instead of spinning on the same bad record.
                 _ = try? unkeyed.decode(AnyDecodableSkip.self)
+            }
+        }
+        return result
+    }
+
+    /// Preserve positions when recovering pane/tab arrays so a damaged record
+    /// cannot shift another folder into the user's active pane or tab.
+    func decodeArrayReplacingInvalid<Element: Decodable>(
+        _ type: Element.Type,
+        forKey key: Key,
+        default defaultValue: Element
+    ) -> [Element]? {
+        guard contains(key), let arrayDecoder = try? superDecoder(forKey: key) else { return nil }
+        guard var items = try? arrayDecoder.unkeyedContainer() else {
+            StateDecodingRecovery.record(in: arrayDecoder)
+            return nil
+        }
+        var result: [Element] = []
+        while !items.isAtEnd {
+            // superDecoder advances exactly one slot even if decoding fails.
+            guard let decoder = try? items.superDecoder() else { return result }
+            do {
+                result.append(try Element(from: decoder))
+            } catch {
+                StateDecodingRecovery.record(in: decoder)
+                result.append(defaultValue)
             }
         }
         return result
@@ -67,6 +117,8 @@ struct TabState: Codable, Equatable, Sendable {
     /// Defaults off so existing tabs don't grow a new chrome surface
     /// behind the user's back on upgrade.
     var previewVisible: Bool
+    var listScrollPath: String?
+    var treeScrollPath: String?
     /// When true, directories sort ahead of files within the same key.
     /// Defaults true to preserve the historical Finder-list behaviour
     /// for upgraded state.json files; user can flip it per tab from the
@@ -83,7 +135,9 @@ struct TabState: Codable, Equatable, Sendable {
         viewMode: PaneViewMode = .list,
         expandedPaths: [String] = [],
         previewVisible: Bool = false,
-        foldersOnTop: Bool = true
+        foldersOnTop: Bool = true,
+        listScrollPath: String? = nil,
+        treeScrollPath: String? = nil
     ) {
         self.folderBookmark = folderBookmark
         self.sortKey = sortKey
@@ -95,6 +149,8 @@ struct TabState: Codable, Equatable, Sendable {
         self.expandedPaths = expandedPaths
         self.previewVisible = previewVisible
         self.foldersOnTop = foldersOnTop
+        self.listScrollPath = listScrollPath
+        self.treeScrollPath = treeScrollPath
     }
 
     /// Default the new fields when reading a `state.json` written before
@@ -103,7 +159,7 @@ struct TabState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case folderBookmark, sortKey, sortAscending, includeHidden,
              columnWidths, selectedURLPaths, viewMode, expandedPaths,
-             previewVisible, foldersOnTop
+             previewVisible, foldersOnTop, listScrollPath, treeScrollPath
     }
 
     init(from decoder: Decoder) throws {
@@ -118,7 +174,9 @@ struct TabState: Codable, Equatable, Sendable {
             viewMode: c.decode(PaneViewMode.self, forKey: .viewMode, default: .list),
             expandedPaths: c.decode([String].self, forKey: .expandedPaths, default: []),
             previewVisible: c.decode(Bool.self, forKey: .previewVisible, default: false),
-            foldersOnTop: c.decode(Bool.self, forKey: .foldersOnTop, default: true)
+            foldersOnTop: c.decode(Bool.self, forKey: .foldersOnTop, default: true),
+            listScrollPath: c.decode(String?.self, forKey: .listScrollPath, default: nil),
+            treeScrollPath: c.decode(String?.self, forKey: .treeScrollPath, default: nil)
         )
     }
 }
@@ -145,8 +203,9 @@ struct PaneState: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         if let c = try? decoder.container(keyedBy: CodingKeys.self),
-           let tabs = try? c.decode([TabState].self, forKey: .tabs)
+           c.contains(.tabs)
         {
+            let tabs = c.decodeArrayReplacingInvalid(TabState.self, forKey: .tabs, default: TabState()) ?? []
             let active = (try? c.decodeIfPresent(Int.self, forKey: .activeTabIndex)) ?? 0
             self.init(
                 tabs: tabs.isEmpty ? [TabState()] : tabs,
@@ -252,10 +311,12 @@ struct WindowState: Codable, Equatable, Sendable {
     /// `WorkspaceState.init(from:)` already pads its legacy pane array.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let panes = c.decodeArrayReplacingInvalid(PaneState.self, forKey: .panes, default: PaneState()) ?? []
+        if c.contains(.panes), panes.count != 4 { StateDecodingRecovery.record(in: decoder) }
         self.init(
             layout: c.decode(PaneLayout.self, forKey: .layout, default: .four),
             focusedPaneIndex: c.decode(Int.self, forKey: .focusedPaneIndex, default: 0),
-            panes: Self.normalizedToFour(c.decode([PaneState].self, forKey: .panes, default: []))
+            panes: Self.normalizedToFour(panes)
         )
     }
 
@@ -310,15 +371,21 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
     /// correctly-composed Korean name instead of `ㅎㅏㄴㄱㅡㄹ`. Defaults
     /// off — it mutates filenames on disk, so it stays opt-in.
     var normalizeHangulOnDragOut: Bool
+    var savedSearches: [SavedFileSearch]
+    var integrationProvider: WorkspaceProvider
 
     init(
         colorScheme: ColorSchemeOption = .system,
         shortcutOverrides: [ShortcutAction: ShortcutBinding] = [:],
-        normalizeHangulOnDragOut: Bool = false
+        normalizeHangulOnDragOut: Bool = false,
+        savedSearches: [SavedFileSearch] = [],
+        integrationProvider: WorkspaceProvider = .cmux
     ) {
         self.colorScheme = colorScheme
         self.shortcutOverrides = shortcutOverrides
         self.normalizeHangulOnDragOut = normalizeHangulOnDragOut
+        self.savedSearches = savedSearches
+        self.integrationProvider = integrationProvider
     }
 
     /// Live binding for `action` — user override if present,
@@ -332,6 +399,8 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
         case colorScheme
         case shortcutOverrides
         case normalizeHangulOnDragOut
+        case savedSearches
+        case integrationProvider
     }
 
     init(from decoder: Decoder) throws {
@@ -360,7 +429,9 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
         self.init(
             colorScheme: colorScheme,
             shortcutOverrides: overrides,
-            normalizeHangulOnDragOut: normalizeHangulOnDragOut
+            normalizeHangulOnDragOut: normalizeHangulOnDragOut,
+            savedSearches: c.decodeArraySkippingInvalid(SavedFileSearch.self, forKey: .savedSearches) ?? [],
+            integrationProvider: c.decode(WorkspaceProvider.self, forKey: .integrationProvider, default: .cmux)
         )
     }
 }
@@ -440,20 +511,12 @@ struct WorkspaceState: Codable, Equatable, Sendable {
         // Legacy shape — top-level WindowState fields. Wrap as a single
         // "Default" project so the user's last layout/panes survive the
         // upgrade unchanged.
-        let layout = c.decode(PaneLayout.self, forKey: .layout, default: .four)
-        let focused = c.decode(Int.self, forKey: .focusedPaneIndex, default: 0)
-        let panes = c.decodeArraySkippingInvalid(PaneState.self, forKey: .panes)
-            ?? Array(repeating: PaneState(), count: 4)
         let favorites = c.decodeArraySkippingInvalid(Favorite.self, forKey: .favorites) ?? []
         let seeded = c.decode(Bool.self, forKey: .favoritesSeeded, default: false)
 
         let migrated = Project(
             name: "Default",
-            state: WindowState(
-                layout: layout,
-                focusedPaneIndex: focused,
-                panes: panes.isEmpty ? Array(repeating: PaneState(), count: 4) : panes
-            )
+            state: try WindowState(from: decoder)
         )
         self.init(
             favorites: favorites,
@@ -502,6 +565,12 @@ struct PersistenceService: @unchecked Sendable {
     /// `~/Library/Application Support/com.mqdir.app/state.json`.
     /// Throws if the support directory cannot be located or created.
     init(fileManager: FileManager = .default) throws {
+        #if DEBUG
+        if let directory = ProcessInfo.processInfo.environment["MQDIR_TEST_STATE_DIR"], !directory.isEmpty {
+            try self.init(stateURL: URL(fileURLWithPath: directory).appendingPathComponent("state.json"), fileManager: fileManager)
+            return
+        }
+        #endif
         let supportRoot = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -509,11 +578,7 @@ struct PersistenceService: @unchecked Sendable {
             create: true
         )
         let bundleDir = supportRoot.appendingPathComponent("com.mqdir.app", isDirectory: true)
-        if !fileManager.fileExists(atPath: bundleDir.path) {
-            try fileManager.createDirectory(at: bundleDir, withIntermediateDirectories: true)
-        }
-        self.stateURL = bundleDir.appendingPathComponent("state.json", isDirectory: false)
-        self.fileManager = fileManager
+        try self.init(stateURL: bundleDir.appendingPathComponent("state.json", isDirectory: false), fileManager: fileManager)
     }
 
     /// Test initializer: writes to an explicit URL. Creates the parent
@@ -532,39 +597,51 @@ struct PersistenceService: @unchecked Sendable {
     /// corrupt JSON. Callers always treat a `nil` load as "first launch".
     /// Never throws — corruption recovery is part of the contract.
     ///
-    /// On a *decode* failure specifically (the file exists and is readable
-    /// but the JSON won't decode), the original is copied aside to
+    /// When decoding fails or repairs damaged pane/tab records, the original
+    /// is copied aside to
     /// `state.corrupt-<timestamp>.json` before returning nil. Otherwise the
     /// very next debounced `saveState` overwrites the only copy of the
     /// user's broken-but-recoverable state, and a support request has
     /// nothing to inspect.
-    func loadState() -> WorkspaceState? {
+    func loadState(onRecovery: ((String) -> Void)? = nil) -> WorkspaceState? {
         guard fileManager.fileExists(atPath: stateURL.path) else { return nil }
         guard let data = try? Data(contentsOf: stateURL) else { return nil }
+        let recovery = StateDecodingRecovery()
+        let decoder = JSONDecoder()
+        decoder.userInfo[StateDecodingRecovery.key] = recovery
         do {
-            return try JSONDecoder().decode(WorkspaceState.self, from: data)
+            let state = try decoder.decode(WorkspaceState.self, from: data)
+            if recovery.repaired {
+                let backedUp = backUpCorruptStateFile()
+                onRecovery?("Some saved panes or tabs were damaged. Your other folders and tabs were restored. "
+                    + (backedUp ? "A copy of the original state was saved for recovery."
+                       : "The original state could not be backed up."))
+            }
+            return state
         } catch {
-            backUpCorruptStateFile(decodeError: error)
+            let backedUp = backUpCorruptStateFile()
+            onRecovery?("Your saved workspace could not be read. "
+                + (backedUp ? "A copy was saved for recovery. The app will open a new workspace."
+                   : "The original state could not be backed up. The app will open a new workspace."))
             return nil
         }
     }
 
-    /// Side-car the unparseable `state.json` so it isn't clobbered by the
-    /// next save, and surface the decode error on stderr for diagnosis.
-    private func backUpCorruptStateFile(decodeError: Error) {
+    /// Preserve the source before a recovered/default state replaces it.
+    private func backUpCorruptStateFile() -> Bool {
         let stamp = Self.corruptBackupTimestampFormatter.string(from: Date())
         let backupURL = stateURL
             .deletingLastPathComponent()
-            .appendingPathComponent("state.corrupt-\(stamp).json", isDirectory: false)
+            .appendingPathComponent("state.corrupt-\(stamp)-\(UUID().uuidString).json", isDirectory: false)
         do {
             try fileManager.copyItem(at: stateURL, to: backupURL)
-            FileHandle.standardError.write(Data(
-                "[mq-dir persist] state.json failed to decode (\(decodeError)); backed up to \(backupURL.lastPathComponent), treating as first launch\n".utf8
-            ))
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
+            return true
         } catch {
             FileHandle.standardError.write(Data(
-                "[mq-dir persist] state.json failed to decode (\(decodeError)); backup copy also failed (\(error)), treating as first launch\n".utf8
+                "[mq-dir persist] state backup failed: \(error)\n".utf8
             ))
+            return false
         }
     }
 

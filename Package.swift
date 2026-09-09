@@ -2,7 +2,7 @@
 import PackageDescription
 
 // SwiftPM manifest for the headless `mqdirCore` library only.
-// The macOS app proper builds via Xcode (`xcodegen generate && xcodebuild`).
+// The macOS app proper builds via Xcode (`Scripts/generate-project.sh && xcodebuild`).
 // This manifest exists so contributors can run `swift test` without Xcode
 // and so CI can validate library logic on smaller runners.
 

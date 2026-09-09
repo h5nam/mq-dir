@@ -9,6 +9,7 @@ enum PaneLayout: Int, CaseIterable, Identifiable, Codable, Sendable {
     case twoH = 2
     case twoV = 3
     case four = 4
+    case three = 5
 
     var id: Int { rawValue }
 
@@ -18,6 +19,7 @@ enum PaneLayout: Int, CaseIterable, Identifiable, Codable, Sendable {
         case .twoH: 2
         case .twoV: 2
         case .four: 4
+        case .three: 3
         }
     }
 
@@ -27,6 +29,7 @@ enum PaneLayout: Int, CaseIterable, Identifiable, Codable, Sendable {
         case .twoH: "rectangle.split.2x1"
         case .twoV: "rectangle.split.1x2"
         case .four: "square.grid.2x2"
+        case .three: "rectangle.split.3x1"
         }
     }
 
@@ -36,6 +39,7 @@ enum PaneLayout: Int, CaseIterable, Identifiable, Codable, Sendable {
         case .twoH: "Two panes — side by side"
         case .twoV: "Two panes — stacked"
         case .four: "Four panes — 2×2 grid"
+        case .three: "Three panes — source and two destinations"
         }
     }
 }
