@@ -9,7 +9,7 @@
 
 🌐 [mqdir.com](https://mqdir.com) · 📓 [Releases](https://github.com/h5nam/mq-dir/releases) · 🛠 [Contributing](CONTRIBUTING.md) · 🌏 [English](README.md)
 
-![mq-dir hero](.github/assets/readme_hero.png)
+![mq-dir launch video](.github/assets/launch.gif)
 
 ## 왜 만들었나
 
