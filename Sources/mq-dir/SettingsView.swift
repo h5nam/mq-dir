@@ -49,7 +49,7 @@ struct SettingsView: View {
             } header: {
                 Text("Filenames")
             } footer: {
-                Text("Korean filenames stored in decomposed (NFD) form look broken — like \u{315E}\u{3157}\u{3134}\u{3131}\u{3161}\u{3139} instead of 한글 — when dragged or copied into other apps. Turn this on to rename them to composed (NFC) form on disk as they leave mq-dir.")
+                Text("Korean filenames stored in decomposed (NFD) form look broken — like \u{315E}\u{3157}\u{3134}\u{3131}\u{3161}\u{3139} instead of 한글 — in some apps. Turn this on to rename them to composed (NFC) form on disk when you drag, copy, or duplicate them in mq-dir. This fixes names for tools that read the file path, such as terminals, editors, git, and zip. Browsers and some other apps may still receive the decomposed name through macOS drag and drop.")
                     .foregroundStyle(.secondary)
             }
 
