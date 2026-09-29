@@ -4,7 +4,7 @@ cask "mq-dir" do
 
   url "https://github.com/h5nam/mq-dir/releases/download/v#{version}/mq-dir-v#{version}.dmg"
   name "mq-dir"
-  desc "Quad-pane native macOS file manager"
+  desc "Quad-pane native file manager with project workspaces"
   homepage "https://github.com/h5nam/mq-dir"
 
   auto_updates false
