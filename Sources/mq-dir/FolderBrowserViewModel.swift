@@ -736,6 +736,32 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         navigate(to: directory ? url : url.deletingLastPathComponent(), restoring: directory ? [] : [url.path])
     }
 
+    /// Navigate to `folder` with `items` selected and the first one
+    /// scrolled into view. Records history like `openFolder` so Back
+    /// returns to where the tab was.
+    func reveal(_ items: [URL], in folder: URL) {
+        if let current = folderURL, current != folder, let frame = currentFrame() {
+            backStack.append(frame)
+        }
+        forwardStack.removeAll()
+        navigate(to: folder, restoring: items.map(\.path))
+        pendingListScrollPath = items.first?.path
+        pendingTreeScrollPath = items.first?.path
+    }
+
+    /// Go where a typed or pasted path resolved: into a folder, or to a
+    /// file's folder with the file selected.
+    func go(to resolution: PathInput.Resolution) {
+        switch resolution {
+        case let .folder(url):
+            openFolder(url)
+        case let .file(url):
+            reveal([url], in: url.deletingLastPathComponent())
+        case .notFound, .empty:
+            break
+        }
+    }
+
     func openFolder(_ url: URL) {
         if let current = folderURL, current != url, let frame = currentFrame() {
             backStack.append(frame)
@@ -1233,6 +1259,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// nothing pasteable.
     var canPasteFiles: Bool {
         NSPasteboard.general.canReadObject(forClasses: [NSURL.self], options: nil)
+    }
+
+    /// Where the pasteboard's text points when it holds a path to something
+    /// that exists rather than copied files. Feeds the empty-area menu's
+    /// "Go to Copied Path"; ⌘V takes the same route via `MainWindowView`.
+    var copiedPathDestination: PathInput.Resolution? {
+        guard !canPasteFiles,
+            let path = PathInput.pastedPath(NSPasteboard.general.string(forType: .string))
+        else { return nil }
+        let resolution = PathInput.resolve(path, relativeTo: folderURL?.path)
+        return resolution.exists ? resolution : nil
     }
 
     // MARK: Selection (multi-select with cmd / shift)

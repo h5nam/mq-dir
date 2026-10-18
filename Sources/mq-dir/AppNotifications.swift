@@ -22,6 +22,8 @@ enum AppCommand: Equatable {
     case toggleHiddenFiles
     case goBack
     case goForward
+    /// Swap the toolbar breadcrumb for the Go to Folder path field.
+    case goToFolder
     case focusSearch
     /// Add the focused pane's current folder to the sidebar Favorites list.
     case addCurrentFolderToFavorites
@@ -69,6 +71,9 @@ enum AppCommand: Equatable {
     /// pane index; receivers ignore values outside the active layout's
     /// pane count.
     case focusPane(index: Int)
+    /// Hand keyboard focus back to the focused pane's file list, e.g. after
+    /// the Go to Folder field closes. Handled by `BrowserPaneView`.
+    case focusFileList
 
     /// userInfo key under which the command travels on `.mqdirCommand`.
     fileprivate static let userInfoKey = "command"

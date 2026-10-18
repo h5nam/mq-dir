@@ -121,6 +121,8 @@ struct MenuCommands: Commands {
                 .keyboardShortcut(binding(.reload))
             Button("Parent Folder") { post(.parentFolder) }
                 .keyboardShortcut(binding(.parentFolder))
+            Button("Go to Folder\u{2026}") { post(.goToFolder) }
+                .keyboardShortcut(binding(.goToFolder))
             Button("Toggle Hidden Files") { post(.toggleHiddenFiles) }
                 .keyboardShortcut(binding(.toggleHiddenFiles))
             Divider()

@@ -23,6 +23,7 @@ public enum ShortcutAction: String, Codable, Sendable, CaseIterable, Hashable, C
     case back
     case forward
     case openWithDefaultApp
+    case goToFolder
 
     /// Human-readable label rendered in the Settings list.
     public var label: String {
@@ -44,6 +45,7 @@ public enum ShortcutAction: String, Codable, Sendable, CaseIterable, Hashable, C
         case .back:               return "Back"
         case .forward:            return "Forward"
         case .openWithDefaultApp: return "Open with Default App"
+        case .goToFolder:         return "Go to Folder"
         }
     }
 
@@ -73,6 +75,8 @@ public enum ShortcutAction: String, Codable, Sendable, CaseIterable, Hashable, C
         case .back:               return ShortcutBinding(key: .character("["), modifiers: .command)
         case .forward:            return ShortcutBinding(key: .character("]"), modifiers: .command)
         case .openWithDefaultApp: return ShortcutBinding(key: .return, modifiers: .shift)
+        // Finder's Go → Go to Folder, so muscle memory carries over.
+        case .goToFolder:         return ShortcutBinding(key: .character("g"), modifiers: [.command, .shift])
         }
     }
 }
