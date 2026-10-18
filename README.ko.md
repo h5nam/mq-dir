@@ -23,7 +23,7 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 - ↹ **Pane별 탭** — Safari 스타일 탭 바, X / +, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], 드래그로 재정렬, 탭을 즐겨찾기로 끌어다 추가, 우클릭에 Close Other / Close to Right / Duplicate, 마지막 탭 안전장치.
 - 🌳 **VS Code 스타일 트리 뷰** — 탭별 토글, 자식 lazy 로드, 셰브론만 펼침/접힘(폴더 이름 클릭은 선택만), Shift / Cmd 멀티선택, 외부 앱으로 파일 드래그 아웃. 새 탭은 폴더에 **⌘+더블클릭** 또는 **⌘+Enter** (리스트뷰와 동일).
 - ⌨️ **키보드 네비게이션 + Finder급 우클릭 메뉴** — ↑/↓로 행 이동(꾹 누르면 연속 이동), Shift로 다중 선택 확장, Return으로 열기, ⌘+Return으로 새 탭 열기. **⌘C / ⌘X / ⌘V** 복사 / 잘라내기 / 붙여넣기 — Windows Explorer 스타일 이동 시맨틱(⌘X로 마킹한 선택은 ⌘V에서 복사가 아닌 이동, Finder엔 없는 동작). 우클릭 메뉴에 Open With ▸ (LaunchServices 후보 + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, **Normalize Filename to NFC** (디스크에 NFD(자모분리형)로 저장된 한글 파일명을 Windows / Slack / Discord / Gmail / 웹 업로더가 기대하는 NFC(조합형)로 다시 써줍니다 — 다중 선택 지원, 이미 NFC인 파일은 no-op), Move to Trash. 다중 선택 시 선택 전체에 적용. rename 후 키보드 포커스 복원도 list/tree 양쪽에서 정상.
-- ⚙️ **설정 → 단축키** — Preferences(⌘,)에서 17개 액션을 자유롭게 재바인딩, F1…F12 지원. 행별 기본값 리셋.
+- ⚙️ **설정 → 단축키** — Preferences(⌘,)에서 18개 액션을 자유롭게 재바인딩, F1…F12 지원. 행별 기본값 리셋.
 - 👀 **탭별 미리보기 패널** — pane 헤더에서 토글 (또는 ⌘⇧P). PDF는 PDFKit으로 연속 스크롤 + 페이지 네비게이션, 그 외 이미지·코드·비디오·오디오·오피스 문서(DOCX/PPTX/XLSX)는 Quick Look으로, `.md`는 MarkdownUI로 GFM(테이블, 코드 블록, 리스트) 풀 렌더링. 폴더·다중·빈 선택은 별도 요약. zip 아카이브는 in-pane(목록 + 단일 항목 디코드) 미리보기. 비-PDF 문서나 macOS Quick Look이 generator를 제공하지 않는 포맷(HWP 등)의 다중 페이지 탐색은 ⎵로 floating Quick Look을 띄우거나 ⇧↩으로 시스템 기본 앱(HWP면 한컴 Office Viewer 등)에서 열어 보세요.
 - 🏷️ **Finder 태그 표시** — 태그별 색상 점(빨강 / 주황 / 노랑 / 초록 / 파랑 / 보라 / 회색)을 macOS 메타데이터에서 직접 읽어 다중 태그도 모두 렌더링. 사이드바 Tags 섹션에 현재 폴더의 모든 태그 노출. 읽기 전용 — 태그 적용/편집은 Finder에서.
 - 📂 **폴더 커스텀 아이콘** — Finder Get Info → 드래그로 지정한 폴더 커스텀 아이콘을 그대로 행에 렌더링.
@@ -31,6 +31,7 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 - 📁 **프로젝트(워크스페이스)** — (레이아웃 + pane 탭 + 활성 pane)을 이름 붙인 스냅샷으로 저장. + 버튼으로 만들고, 클릭으로 전환, 우클릭에서 Rename / Delete, 드래그로 재정렬. 전환할 때 떠나는 프로젝트는 자동 저장됩니다.
 - 💾 **상태 영구 저장** — 모든 pane / 탭 / 즐겨찾기 / 프로젝트가 재시작·강제 종료, 심지어 스키마 업그레이드(레거시 `state.json` 자동 마이그레이션)까지 거쳐도 그대로 남습니다.
 - 🔎 **Pane별 재귀 검색** — debounce, case-insensitive substring 매치, 현재 폴더 서브트리 전체. ⌘F.
+- 🧭 **경로로 바로 이동** — 경로 바를 클릭하거나 ⌘⇧G를 누르고 경로를 입력·붙여넣기. Return으로 이동, ⌘Return은 새 탭, Tab은 폴더 이름 자동완성. 따옴표로 감싼 경로, 셸 이스케이프(`My\ Folder`), `file://` URL, `~/…`, 상대 경로, `:줄:열`이 붙은 파일 경로(파일이 든 폴더를 열고 그 파일을 선택)까지 그대로 받습니다. 입력창 없이 어디서든 경로를 복사한 뒤 파일 목록에서 ⌘V만 눌러도 이동합니다.
 - 🔄 **앱 내 자동 업데이트** — Sparkle 2가 24시간마다 appcast를 polling, 새 릴리즈가 있으면 사이드바에 "Update Available" 버튼이 떠서 표준 install / relaunch 흐름이 진행됩니다.
 - 💬 **앱 내 Send Feedback** — 사이드바 footer → 짧은 노트 + 옵션 스크린샷을 메인테이너에게 바로 전송(이메일 클라이언트 우회).
 - 🔗 **코딩 앱 선택 연동** — 사이드바에서 cmux, Orca, Paseo, Claude Code Desktop, Codex Desktop을 선택한 뒤 Sync로 로컬 작업 폴더를 불러옵니다. 클릭하면 활성 pane, ⌘-클릭하면 새 탭에서 열립니다. 앱 선택은 재실행 후에도 유지됩니다. [설정 및 지원 범위](docs/integrations.md)를 참고하세요.

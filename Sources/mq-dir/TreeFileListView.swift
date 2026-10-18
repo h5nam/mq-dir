@@ -53,6 +53,9 @@ struct TreeFileListView: View {
             .onChange(of: isFocused) { _, newValue in
                 if newValue { treeFocused = true }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCommand)) { note in
+                if isFocused, AppCommand.from(note) == .focusFileList { treeFocused = true }
+            }
             // "Reveal in Tree" queues a row ID on the VM; scroll it into view
             // once the expanded ancestors have rendered, then clear the
             // signal so a later identical reveal still fires. Deferred one

@@ -183,9 +183,16 @@ struct BrowserPaneView: View {
 
         Divider()
 
-        Button("Paste") { viewModel.pasteFromPasteboard(normalizeHangul: normalizeHangulOnDragOut) }
-            .keyboardShortcut("v", modifiers: .command)
-            .disabled(!viewModel.canPasteFiles || viewModel.folderURL == nil)
+        // A copied path (Terminal, an editor's Copy Path, ⌥⌘C in Finder)
+        // turns Paste into a jump there — the same thing ⌘V does.
+        if let copied = viewModel.copiedPathDestination {
+            Button("Go to Copied Path") { viewModel.go(to: copied) }
+                .keyboardShortcut("v", modifiers: .command)
+        } else {
+            Button("Paste") { viewModel.pasteFromPasteboard(normalizeHangul: normalizeHangulOnDragOut) }
+                .keyboardShortcut("v", modifiers: .command)
+                .disabled(!viewModel.canPasteFiles || viewModel.folderURL == nil)
+        }
 
         Divider()
 
@@ -880,6 +887,9 @@ struct BrowserPaneView: View {
                 // Mirror pane focus into SwiftUI's focus chain so the
                 // currently-focused pane's list claims keyboard input.
                 if newValue { listFocused = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCommand)) { note in
+                if isFocused, AppCommand.from(note) == .focusFileList { listFocused = true }
             }
             // Read Shift off the captured `KeyPress` instead of
             // `NSEvent.modifierFlags` — the latter is "modifiers right

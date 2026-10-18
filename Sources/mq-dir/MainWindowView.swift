@@ -23,6 +23,8 @@ struct MainWindowView: View {
     /// as a static placeholder so SwiftUI doesn't auto-promote it to the
     /// window's first responder on appearance.
     @State private var searchActive: Bool = false
+    /// Non-nil while the breadcrumb is swapped for the Go to Folder field.
+    @State private var goToFolder: GoToFolderRequest?
 
     /// Owning ID of the project this view instance was constructed for.
     /// `mqdirApp` keys this view on `workspace.workspace.activeProjectID`,
@@ -115,11 +117,13 @@ struct MainWindowView: View {
                 focusedPane: focusedPane,
                 searchActive: $searchActive,
                 searchFocused: $searchFocused,
-                sidebar: sidebar
+                sidebar: sidebar,
+                goToFolder: { beginGoToFolder() }
             ))
             .modifier(EditMenuNotifications(
                 focusedPane: focusedPane,
-                normalizeHangul: workspace.workspace.settings.normalizeHangulOnDragOut
+                normalizeHangul: workspace.workspace.settings.normalizeHangulOnDragOut,
+                goToPastedPath: goToPastedPath
             ))
             .modifier(EditFileActionsNotifications(
                 focusedPane: focusedPane,
@@ -183,6 +187,9 @@ struct MainWindowView: View {
 
             VStack(spacing: 0) {
                 toolbar
+                    // Above the panes so the Go to Folder suggestion list,
+                    // which hangs below the toolbar, draws over them.
+                    .zIndex(1)
                 Divider().background(Theme.Color.separator)
                 paneGrid
                 Divider().background(Theme.Color.separator)
@@ -278,7 +285,7 @@ struct MainWindowView: View {
             ToolbarIconButton(symbol: "arrow.clockwise", help: "Reload (⌘R)") { focusedPane.reload() }
                 .disabled(focusedPane.folderURL == nil)
 
-            breadcrumb
+            pathBar
 
             searchField
             SearchOptionsMenu(model: focusedPane, workspace: workspace,
@@ -341,8 +348,63 @@ struct MainWindowView: View {
                 .strokeBorder(Theme.Color.separator, lineWidth: 0.5)
         )
         .contentShape(Rectangle())
-        .onTapGesture { focusedPane.chooseFolder() }
+        .onTapGesture { beginGoToFolder() }
+        .help("Click to type or paste a path")
         .contextMenu { breadcrumbContextMenu }
+    }
+
+    /// The breadcrumb, or the Go to Folder field while one is open.
+    @ViewBuilder
+    private var pathBar: some View {
+        if let request = goToFolder {
+            GoToFolderField(
+                request: request,
+                base: focusedPane.folderURL,
+                onGo: goTo,
+                onCancel: { endGoToFolder(restoringListFocus: true) },
+                onFocusLost: { endGoToFolder(restoringListFocus: false) }
+            )
+            .id(request.id)
+        } else {
+            breadcrumb
+        }
+    }
+
+    /// Open the Go to Folder field on `text`, or on the focused folder with
+    /// a trailing slash so typing after it drills down.
+    private func beginGoToFolder(_ text: String? = nil, notFound: Bool = false) {
+        let current = focusedPane.folderURL.map { url -> String in
+            let path = (url.path as NSString).abbreviatingWithTildeInPath
+            return path.hasSuffix("/") ? path : path + "/"
+        }
+        goToFolder = GoToFolderRequest(text: text ?? current ?? "~/", notFound: notFound)
+    }
+
+    private func goTo(_ resolution: PathInput.Resolution, newTab: Bool) {
+        if newTab { focusedPaneVM.newTab() }
+        focusedPane.go(to: resolution)
+        endGoToFolder(restoringListFocus: true)
+    }
+
+    private func endGoToFolder(restoringListFocus: Bool) {
+        guard goToFolder != nil else { return }
+        goToFolder = nil
+        // After the field unmounts, or the list can't take focus back.
+        if restoringListFocus { DispatchQueue.main.async { AppCommand.focusFileList.post() } }
+    }
+
+    /// ⌘V on the file list when the pasteboard holds a path instead of
+    /// files. One that doesn't exist opens the field showing it, so the
+    /// paste visibly did something.
+    private func goToPastedPath(_ path: String) {
+        switch PathInput.resolve(path, relativeTo: focusedPane.folderURL?.path) {
+        case .empty:
+            break
+        case .notFound:
+            beginGoToFolder(path, notFound: true)
+        case let resolution:
+            focusedPane.go(to: resolution)
+        }
     }
 
     /// Trailing clipboard glyph that copies the current folder's POSIX
@@ -383,6 +445,7 @@ struct MainWindowView: View {
         Button("Open in Finder") { focusedPane.openCurrentFolderInFinder() }
             .disabled(focusedPane.folderURL == nil)
         Divider()
+        Button("Go to Folder…") { beginGoToFolder() }
         Button("Open Folder…") { focusedPane.chooseFolder() }
     }
 
@@ -719,6 +782,7 @@ private struct NavigationNotifications: ViewModifier {
     @Binding var searchActive: Bool
     var searchFocused: FocusState<Bool>.Binding
     @ObservedObject var sidebar: SidebarViewModel
+    let goToFolder: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -741,6 +805,8 @@ private struct NavigationNotifications: ViewModifier {
                     focusedPane.goBack()
                 case .goForward:
                     focusedPane.goForward()
+                case .goToFolder:
+                    goToFolder()
                 case .focusSearch:
                     searchActive = true
                     // Defer focus until after the conditional TextField has
@@ -810,6 +876,8 @@ private struct EditMenuNotifications: ViewModifier {
     /// modifier is built (in `MainWindowView.body`, which owns the
     /// workspace) so the ⌘V paste path can normalise pasted-in NFD names.
     let normalizeHangul: Bool
+    /// ⌘V with a copied path (text) rather than copied files.
+    let goToPastedPath: (String) -> Void
 
     func body(content: Content) -> some View {
         content
@@ -823,7 +891,11 @@ private struct EditMenuNotifications: ViewModifier {
                 case .cut:
                     focusedPane.cutSelectionToPasteboard()
                 case .paste:
-                    focusedPane.pasteFromPasteboard(normalizeHangul: normalizeHangul)
+                    if focusedPane.canPasteFiles {
+                        focusedPane.pasteFromPasteboard(normalizeHangul: normalizeHangul)
+                    } else if let path = PathInput.pastedPath(NSPasteboard.general.string(forType: .string)) {
+                        goToPastedPath(path)
+                    }
                 case .delete:
                     focusedPane.moveSelectionToTrash()
                 case .permanentDelete:
